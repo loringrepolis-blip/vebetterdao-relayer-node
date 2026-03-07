@@ -9,6 +9,12 @@ function formatB3TR(wei: bigint): string {
   return `${whole}.${frac.toString().padStart(2, "0")} B3TR`
 }
 
+function formatVOT3(wei: bigint): string {
+  const whole = wei / 10n ** 18n
+  const frac = (wei % 10n ** 18n) / 10n ** 16n
+  return `${whole}.${frac.toString().padStart(2, "0")} VOT3`
+}
+
 function shortAddr(addr: string): string {
   return addr.slice(0, 6) + "..." + addr.slice(-4)
 }
@@ -55,7 +61,7 @@ export function renderSummary(s: RelayerSummary): string {
   out.push(line(chalk.bold(`ROUND #${s.currentRoundId}`) + "  " + roundStatus))
   out.push(line(pad(`Snapshot   ${s.roundSnapshot}`, `Deadline   ${s.roundDeadline}`)))
   out.push(line(pad(`Auto-voters  ${chalk.white(s.autoVotingUsers.toString())}`, `Relayers   ${chalk.white(s.registeredRelayers.length.toString())}`)))
-  out.push(line(pad(`Voters     ${chalk.white(s.totalVoters.toString())}`, `Total VOT3 ${chalk.white(formatB3TR(s.totalVotes))}`)))
+  out.push(line(pad(`Voters     ${chalk.white(s.totalVoters.toString())}`, `Total VOT3 ${chalk.white(formatVOT3(s.totalVotes))}`)))
 
   out.push(sep())
 
