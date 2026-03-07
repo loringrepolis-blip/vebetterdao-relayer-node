@@ -1,8 +1,6 @@
 import chalk from "chalk"
 import { RelayerSummary, CycleResult } from "./types"
 
-const W = 66
-
 function formatB3TR(wei: bigint): string {
   const whole = wei / 10n ** 18n
   const frac = (wei % 10n ** 18n) / 10n ** 16n
@@ -24,86 +22,100 @@ function pct(num: bigint, den: bigint): string {
   return ((Number(num) / Number(den)) * 100).toFixed(2) + "%"
 }
 
-function pad(left: string, right: string, width: number = W - 4): string {
-  const gap = width - left.length - right.length
+function stripAnsi(str: string): number {
+  return str.replace(/\x1b\[[0-9;]*m/g, "").length
+}
+
+function pad(left: string, right: string, width: number = 62): string {
+  const gap = width - stripAnsi(left) - stripAnsi(right)
   return left + " ".repeat(Math.max(1, gap)) + right
 }
 
-function line(content: string): string {
-  const inner = content.padEnd(W - 4)
-  return `║ ${inner} ║`
+function heading(text: string): string {
+  return chalk.bold.cyan(text)
 }
 
-function sep(): string {
-  return "╠" + "═".repeat(W - 2) + "╣"
+function label(text: string): string {
+  return chalk.dim(text)
 }
 
 export function renderSummary(s: RelayerSummary): string {
   const out: string[] = []
-  const top = "╔" + "═".repeat(W - 2) + "╗"
-  const bot = "╚" + "═".repeat(W - 2) + "╝"
 
-  const title = "VeBetterDAO Relayer Node"
-  const titlePad = Math.floor((W - 4 - title.length) / 2)
+  out.push("")
+  out.push(heading("  VeBetterDAO Relayer Node"))
+  out.push(chalk.dim("  " + "─".repeat(60)))
+  out.push("")
 
-  out.push(top)
-  out.push(line(" ".repeat(titlePad) + chalk.bold.cyan(title)))
-  out.push(sep())
+  // Node info
+  const regStatus = s.isRegistered ? chalk.green("Registered") : chalk.red("Not registered")
+  out.push("  " + pad(label("Network") + "  " + chalk.white.bold(s.network), label("Block") + " " + chalk.white(s.latestBlock.toLocaleString())))
+  out.push("  " + pad(label("Node") + "     " + chalk.gray(new URL(s.nodeUrl).hostname), ""))
+  out.push("  " + pad(label("Address") + "  " + chalk.yellow(shortAddr(s.relayerAddress)), regStatus))
 
-  const status = s.isRegistered ? chalk.green("✓ Registered") : chalk.red("✗ Not registered")
-  out.push(line(pad("Network    " + chalk.white(s.network), "Block  " + chalk.white(s.latestBlock.toLocaleString()))))
-  out.push(line(pad("Node       " + chalk.gray(new URL(s.nodeUrl).hostname), "")))
-  out.push(line(pad("Address    " + chalk.yellow(shortAddr(s.relayerAddress)), status)))
+  out.push("")
+  out.push(chalk.dim("  " + "─".repeat(60)))
+  out.push("")
 
-  out.push(sep())
+  // Round info
+  const roundStatus = s.isRoundActive ? chalk.green("Active") : chalk.dim("Ended")
+  out.push("  " + heading(`Round #${s.currentRoundId}`) + "  " + roundStatus)
+  out.push("  " + pad(label("Snapshot") + "  " + chalk.white(s.roundSnapshot.toString()), label("Deadline") + "  " + chalk.white(s.roundDeadline.toString())))
+  out.push("  " + pad(label("Auto-voters") + " " + chalk.white.bold(s.autoVotingUsers.toString()), label("Relayers") + " " + chalk.white.bold(s.registeredRelayers.length.toString())))
+  out.push("  " + pad(label("Voters") + "      " + chalk.white(s.totalVoters.toString()), label("Total") + " " + chalk.cyan(formatVOT3(s.totalVotes))))
 
-  const roundStatus = s.isRoundActive ? chalk.green("● Active") : chalk.gray("○ Ended")
-  out.push(line(chalk.bold(`ROUND #${s.currentRoundId}`) + "  " + roundStatus))
-  out.push(line(pad(`Snapshot   ${s.roundSnapshot}`, `Deadline   ${s.roundDeadline}`)))
-  out.push(line(pad(`Auto-voters  ${chalk.white(s.autoVotingUsers.toString())}`, `Relayers   ${chalk.white(s.registeredRelayers.length.toString())}`)))
-  out.push(line(pad(`Voters     ${chalk.white(s.totalVoters.toString())}`, `Total VOT3 ${chalk.white(formatVOT3(s.totalVotes))}`)))
+  out.push("")
+  out.push(chalk.dim("  " + "─".repeat(60)))
+  out.push("")
 
-  out.push(sep())
-
+  // Fee config
   const feeStr = s.feeDenominator > 0n ? pct(s.feePercentage, s.feeDenominator) : "—"
-  out.push(line(pad(`Vote Wt    ${s.voteWeight}`, `Claim Wt   ${s.claimWeight}`)))
-  out.push(line(pad(`Fee        ${feeStr}`, `Cap        ${formatB3TR(s.feeCap)}`)))
-  out.push(line(pad(`Early Access  ${s.earlyAccessBlocks} blocks`, "")))
+  out.push("  " + pad(label("Vote Weight") + "  " + chalk.white.bold(s.voteWeight.toString()), label("Claim Weight") + " " + chalk.white.bold(s.claimWeight.toString())))
+  out.push("  " + pad(label("Fee") + "          " + chalk.yellow(feeStr), label("Cap") + " " + chalk.yellow(formatB3TR(s.feeCap))))
+  out.push("  " + pad(label("Early Access") + " " + chalk.white(s.earlyAccessBlocks.toString()) + chalk.dim(" blocks"), ""))
 
-  out.push(sep())
-  out.push(line(chalk.bold("THIS ROUND")))
+  out.push("")
+  out.push(chalk.dim("  " + "─".repeat(60)))
+  out.push("")
 
+  // This round stats
+  out.push("  " + heading("This Round"))
   const completionPct = s.currentTotalWeighted > 0n
     ? pct(s.currentCompletedWeighted, s.currentTotalWeighted)
     : "—"
-  out.push(line(pad(
-    `Completion ${completionPct}`,
-    `Missed     ${s.currentMissedUsers}`,
-  )))
-  out.push(line(pad(
-    `Pool       ${chalk.green(formatB3TR(s.currentTotalRewards))}`,
-    `Your share ${chalk.green(formatB3TR(s.currentRelayerClaimable))}`,
-  )))
-  out.push(line(pad(
-    `Actions    ${s.currentRelayerActions} (wt: ${s.currentRelayerWeighted})`,
-    `Total acts ${s.currentTotalActions}`,
-  )))
+  const completionColor = s.currentTotalWeighted > 0n && s.currentCompletedWeighted >= s.currentTotalWeighted
+    ? chalk.green : chalk.yellow
+  out.push("  " + pad(
+    label("Completion") + " " + completionColor(completionPct),
+    label("Missed") + " " + (s.currentMissedUsers > 0n ? chalk.red(s.currentMissedUsers.toString()) : chalk.green(s.currentMissedUsers.toString())),
+  ))
+  out.push("  " + pad(
+    label("Pool") + "       " + chalk.green(formatB3TR(s.currentTotalRewards)),
+    label("Your share") + " " + chalk.greenBright.bold(formatB3TR(s.currentRelayerClaimable)),
+  ))
+  out.push("  " + pad(
+    label("Actions") + "    " + chalk.white(s.currentRelayerActions.toString()) + chalk.dim(" (wt: ") + chalk.white(s.currentRelayerWeighted.toString()) + chalk.dim(")"),
+    label("Total") + " " + chalk.white(s.currentTotalActions.toString()),
+  ))
 
+  // Previous round
   if (s.previousRoundId > 0) {
-    out.push(line(""))
-    out.push(line(chalk.bold(`PREVIOUS ROUND #${s.previousRoundId}`)))
-    const claimStatus = s.previousRewardClaimable ? chalk.green("✓ Claimable") : chalk.gray("✗ Not yet")
-    out.push(line(pad(
-      `Pool       ${chalk.green(formatB3TR(s.previousTotalRewards))}`,
-      `Your share ${chalk.green(formatB3TR(s.previousRelayerClaimable))}`,
-    )))
-    out.push(line(pad(
-      `Actions    ${s.previousRelayerActions}`,
+    out.push("")
+    out.push(chalk.dim("  " + "─".repeat(60)))
+    out.push("")
+    const claimStatus = s.previousRewardClaimable ? chalk.green("Claimable") : chalk.dim("Not yet")
+    out.push("  " + heading(`Previous Round #${s.previousRoundId}`))
+    out.push("  " + pad(
+      label("Pool") + "       " + chalk.green(formatB3TR(s.previousTotalRewards)),
+      label("Your share") + " " + chalk.greenBright.bold(formatB3TR(s.previousRelayerClaimable)),
+    ))
+    out.push("  " + pad(
+      label("Actions") + "    " + chalk.white(s.previousRelayerActions.toString()),
       claimStatus,
-    )))
+    ))
   }
 
-  out.push(bot)
+  out.push("")
   return out.join("\n")
 }
 
@@ -113,11 +125,14 @@ export function renderCycleResult(r: CycleResult): string[] {
   const dryTag = r.dryRun ? chalk.yellow(" (DRY RUN)") : ""
 
   if (r.totalUsers === 0) {
-    lines.push(`${label} round #${r.roundId}: no users${dryTag}`)
+    lines.push(`${label} round #${r.roundId}: ${chalk.dim("no users")}${dryTag}`)
     return lines
   }
 
-  lines.push(`${label} round #${r.roundId}: ${chalk.green(r.successful.toString())}/${r.totalUsers} successful${dryTag}`)
+  const ratio = r.successful === r.totalUsers
+    ? chalk.green.bold(`${r.successful}/${r.totalUsers}`)
+    : chalk.yellow(`${r.successful}/${r.totalUsers}`)
+  lines.push(`${label} round #${r.roundId}: ${ratio} successful${dryTag}`)
 
   if (r.failed.length > 0)
     lines.push(chalk.red(`  ${r.failed.length} failed`) + chalk.gray(` (${r.failed.slice(0, 3).map((f) => shortAddr(f.user)).join(", ")}${r.failed.length > 3 ? "..." : ""})`))

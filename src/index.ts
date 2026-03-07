@@ -74,8 +74,18 @@ async function main() {
   const thor = ThorClient.at(config.nodeUrl, { isPollingEnabled: false })
 
   let running = true
-  process.on("SIGINT", () => { running = false })
-  process.on("SIGTERM", () => { running = false })
+  let forceExit = false
+  const shutdown = () => {
+    if (forceExit) {
+      log(chalk.red("Force exit."))
+      process.exit(1)
+    }
+    forceExit = true
+    running = false
+    log(chalk.yellow("Shutting down after current operation... (press Ctrl+C again to force quit)"))
+  }
+  process.on("SIGINT", shutdown)
+  process.on("SIGTERM", shutdown)
 
   while (running) {
     try {
