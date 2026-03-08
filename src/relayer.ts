@@ -9,6 +9,7 @@ import {
   getCurrentRoundId,
   getRoundSnapshot,
   getAutoVotingUsers,
+  getAlreadySkippedVotersForRound,
   hasVoted,
 } from "./contracts"
 
@@ -194,7 +195,7 @@ export async function runCastVoteCycle(
 
   // Filter out users who already voted (batched to avoid overwhelming the node)
   log("Checking who already voted...")
-  const needsVote: string[] = []
+  let needsVote: string[] = []
   let alreadyVoted = 0
   const CHECK_BATCH = 50
   for (let i = 0; i < allUsers.length; i += CHECK_BATCH) {
@@ -206,6 +207,22 @@ export async function runCastVoteCycle(
     }
   }
   log(`${needsVote.length} users need voting (${alreadyVoted} already voted)`)
+
+  // Exclude users who already emitted AutoVoteSkipped this round (ineligible, e.g. balance < 1 VOT3)
+  const best = await thor.blocks.getBestBlockCompressed()
+  const latestBlock = best?.number ?? snapshot
+  const skippedSet = await getAlreadySkippedVotersForRound(
+    thor,
+    config.xAllocationVotingAddress,
+    roundId,
+    snapshot,
+    latestBlock,
+  )
+  if (skippedSet.size > 0) {
+    const before = needsVote.length
+    needsVote = needsVote.filter((u) => !skippedSet.has(u.toLowerCase()))
+    log(`${needsVote.length} users need voting (${before - needsVote.length} already skipped this round)`)
+  }
 
   if (needsVote.length === 0) {
     return { phase: "vote", roundId, totalUsers: allUsers.length, successful: 0, failed: [], transient: [], txIds: [], dryRun }

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "skills": {
+    "auto-voting-relayers": {
+      "source": "vechain/vechain-ai-skills",
+      "sourceType": "github",
+      "computedHash": "52147fdab413b0946248b514f47f2019f1297fa7251645ad9b2c5efb9ce147e1"
+    },
+    "grill-me": {
+      "source": "vechain/vechain-ai-skills",
+      "sourceType": "github",
+      "computedHash": "a096bc3a1b5f73b889f688b82cf806cc9ffc278551b47efee4465265280c555f"
+    }
+  }
+}

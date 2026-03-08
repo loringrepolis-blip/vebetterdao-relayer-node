@@ -183,6 +183,45 @@ export async function getAutoVotingUsers(
   return [...userState.entries()].filter(([, on]) => on).map(([a]) => a)
 }
 
+/**
+ * Returns the set of voter addresses that already emitted AutoVoteSkipped for the given round.
+ * Used so the relayer does not retry castVoteOnBehalfOf for ineligible users (e.g. balance < 1 VOT3).
+ */
+export async function getAlreadySkippedVotersForRound(
+  thor: ThorClient,
+  contractAddress: string,
+  roundId: number,
+  fromBlock: number,
+  toBlock: number,
+): Promise<Set<string>> {
+  const event = xavAbi.getEvent("AutoVoteSkipped") as any
+  const topics = event.encodeFilterTopicsNoNull({})
+  const skipped = new Set<string>()
+  let offset = 0
+
+  while (true) {
+    const logs = await thor.logs.filterEventLogs({
+      range: { unit: "block" as const, from: fromBlock, to: toBlock },
+      options: { offset, limit: MAX_EVENTS },
+      order: "asc",
+      criteriaSet: [{ criteria: { address: contractAddress, topic0: topics[0] }, eventAbi: event }],
+    })
+    for (const log of logs) {
+      const decoded = event.decodeEventLog({
+        topics: log.topics.map((t: string) => Hex.of(t)),
+        data: Hex.of(log.data),
+      })
+      if (Number(decoded.args.roundId) === roundId) {
+        skipped.add((decoded.args.voter as string).toLowerCase())
+      }
+    }
+    if (logs.length < MAX_EVENTS) break
+    offset += MAX_EVENTS
+  }
+
+  return skipped
+}
+
 // ── Full summary fetch ──────────────────────────────────────
 
 export async function fetchSummary(
