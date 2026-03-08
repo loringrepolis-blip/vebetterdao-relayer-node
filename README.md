@@ -55,10 +55,10 @@ This repo is a standalone relayer node. Run it, and it will:
 ## Quick Start
 
 ```bash
-MNEMONIC="your twelve word mnemonic phrase here" npx @vebetterdao/relayer-node
+MNEMONIC="your twelve word mnemonic phrase here" npx @vechain/vebetterdao-relayer-node
 
 # Testnet
-RELAYER_NETWORK=testnet-staging MNEMONIC="..." npx @vebetterdao/relayer-node
+RELAYER_NETWORK=testnet-staging MNEMONIC="..." npx @vechain/vebetterdao-relayer-node
 ```
 
 No clone, no build.
@@ -66,7 +66,7 @@ No clone, no build.
 ### Alternative: global install
 
 ```bash
-npm install -g @vebetterdao/relayer-node
+npm install -g @vechain/vebetterdao-relayer-node
 MNEMONIC="..." vbd-relayer
 ```
 
