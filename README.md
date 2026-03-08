@@ -54,6 +54,8 @@ This repo is a standalone relayer node. Run it, and it will:
 
 ## Quick Start
 
+**From npm** (requires the package to be [published](https://www.npmjs.com/package/@vechain/vebetterdao-relayer-node)):
+
 ```bash
 MNEMONIC="your twelve word mnemonic phrase here" npx @vechain/vebetterdao-relayer-node
 
@@ -61,7 +63,14 @@ MNEMONIC="your twelve word mnemonic phrase here" npx @vechain/vebetterdao-relaye
 RELAYER_NETWORK=testnet-staging MNEMONIC="..." npx @vechain/vebetterdao-relayer-node
 ```
 
-No clone, no build.
+**From source** (clone and build):
+
+```bash
+git clone https://github.com/vechain/vebetterdao-relayer-node.git
+cd vebetterdao-relayer-node
+npm install && npm run build
+MNEMONIC="your twelve word mnemonic phrase here" node dist/index.js
+```
 
 ### Alternative: global install
 
@@ -70,13 +79,23 @@ npm install -g @vechain/vebetterdao-relayer-node
 MNEMONIC="..." vbd-relayer
 ```
 
+(Only works after the package is published to npm.)
+
 ### Alternative: Docker
+
+**Pre-built image** (after the repo has been pushed to `main` on GitHub, image is built at GHCR; use tag `latest` or `main`):
+
+```bash
+docker run -it --env MNEMONIC="your twelve word mnemonic phrase here" ghcr.io/vechain/vebetterdao-relayer-node:latest
+```
+
+**Build locally** (works without publishing):
 
 ```bash
 git clone https://github.com/vechain/vebetterdao-relayer-node.git
 cd vebetterdao-relayer-node
 docker build -t vbd-relayer .
-docker run --env MNEMONIC="your twelve word mnemonic phrase here" vbd-relayer
+docker run -it --env MNEMONIC="your twelve word mnemonic phrase here" vbd-relayer
 ```
 
 ## Becoming a Relayer
