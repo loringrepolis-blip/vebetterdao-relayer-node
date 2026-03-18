@@ -1,41 +1,8 @@
-<p align="center">
+# VeBetterDAO Relayer Node
 
-```
-                                      #######
-                                 ################
-                               ####################
-                             ###########   #########
-                            #########      #########
-          #######          #########       #########
-          #########       #########      ##########
-           ##########     ########     ####################
-            ##########   #########  #########################
-              ################### ############################
-               #################  ##########          ########
-                 ##############      ###              ########
-                  ############                       #########
-                    ##########                     ##########
-                     ########                    ###########
-                       ###                    ############
-                                          ##############
-                                    #################
-                                   ##############
-                                   #########
-```
+Cast auto-votes, claim rewards, earn fees.
 
-</p>
-
-<h1 align="center">VeBetterDAO Relayer Node</h1>
-
-<p align="center">
-  <strong>Cast auto-votes, claim rewards, earn fees.</strong>
-</p>
-
-<p align="center">
-  <a href="https://docs.vebetterdao.org/vebetter/automation"><img src="https://img.shields.io/badge/docs-auto--voting-blue?style=flat-square" alt="Docs"></a>
-  <a href="https://docs.vebetterdao.org"><img src="https://img.shields.io/badge/docs-vebetterdao.org-blue?style=flat-square" alt="Docs"></a>
-  <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square" alt="License">
-</p>
+[Relayers Docs](https://docs.vebetterdao.org/vebetter/automation) | [VeBetterDAO Docs](https://docs.vebetterdao.org) | [AI Skill](https://github.com/vechain/vebetterdao-relayer-node/blob/main/.agents/skills/auto-voting-relayers/SKILL.md)
 
 ---
 
@@ -200,14 +167,14 @@ The node renders a live dashboard that refreshes each cycle. On startup it shows
 
 Each round displays one of these statuses:
 
-| Status | Meaning |
-|---|---|
-| **Voting in progress** | Active round, votes still being cast |
-| **Voting complete** | All votes cast, waiting for round to end |
-| **Claiming in progress** | Round ended, reward claims in progress |
-| **Actions completed** | All votes + claims done, pool unlocked |
-| **Rewards Locked** | Some users were missed — entire pool is locked |
-| **N/A** | No auto-voting users for this round |
+| Status                   | Meaning                                        |
+| ------------------------ | ---------------------------------------------- |
+| **Voting in progress**   | Active round, votes still being cast           |
+| **Voting complete**      | All votes cast, waiting for round to end       |
+| **Claiming in progress** | Round ended, reward claims in progress         |
+| **Actions completed**    | All votes + claims done, pool unlocked         |
+| **Rewards Locked**       | Some users were missed — entire pool is locked |
+| **N/A**                  | No auto-voting users for this round            |
 
 ## How It Works
 
@@ -232,16 +199,16 @@ Registered relayers get a head start. For the first ~5 days (43,200 blocks) afte
 
 ## Environment Variables
 
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `MNEMONIC` | One of | -- | BIP39 mnemonic phrase |
-| `RELAYER_PRIVATE_KEY` | these two | -- | Hex private key (with or without `0x`) |
-| `RELAYER_NETWORK` | No | `mainnet` | `mainnet` or `testnet-staging` |
-| `NODE_URL` | No | -- | Override Thor node URL (disables automatic node rotation) |
-| `BATCH_SIZE` | No | `50` | Users per transaction batch |
-| `DRY_RUN` | No | `0` | `1` to simulate without sending transactions |
-| `POLL_INTERVAL_MS` | No | `300000` | Milliseconds between cycles (min 60,000) |
-| `RUN_ONCE` | No | `0` | `1` to run a single cycle and exit |
+| Variable              | Required  | Default   | Description                                               |
+| --------------------- | --------- | --------- | --------------------------------------------------------- |
+| `MNEMONIC`            | One of    | --        | BIP39 mnemonic phrase                                     |
+| `RELAYER_PRIVATE_KEY` | these two | --        | Hex private key (with or without `0x`)                    |
+| `RELAYER_NETWORK`     | No        | `mainnet` | `mainnet` or `testnet-staging`                            |
+| `NODE_URL`            | No        | --        | Override Thor node URL (disables automatic node rotation) |
+| `BATCH_SIZE`          | No        | `50`      | Users per transaction batch                               |
+| `DRY_RUN`             | No        | `0`       | `1` to simulate without sending transactions              |
+| `POLL_INTERVAL_MS`    | No        | `300000`  | Milliseconds between cycles (min 60,000)                  |
+| `RUN_ONCE`            | No        | `0`       | `1` to run a single cycle and exit                        |
 
 ### Node Rotation
 
@@ -258,20 +225,20 @@ If you set `NODE_URL`, only that single node is used and rotation is disabled.
 
 `MNEMONIC` and `RELAYER_PRIVATE_KEY` can also be provided as [Docker Compose secrets](https://docs.docker.com/compose/how-tos/use-secrets/). Place the value in a file and reference it in `docker-compose.yml`:
 
-| Secret name | Equivalent env var |
-|---|---|
-| `mnemonic` | `MNEMONIC` |
+| Secret name           | Equivalent env var    |
+| --------------------- | --------------------- |
+| `mnemonic`            | `MNEMONIC`            |
 | `relayer_private_key` | `RELAYER_PRIVATE_KEY` |
 
 Secrets are read from `/run/secrets/<name>` at startup. Environment variables take precedence over secrets when both are set.
 
 ## Contracts
 
-| Contract | Purpose | Key Functions |
-|---|---|---|
-| **XAllocationVoting** | Round info, auto-voting users, vote execution | `castVoteOnBehalfOf`, `currentRoundId`, `hasVoted`, `AutoVotingToggled` event |
-| **VoterRewards** | Reward claiming with fee deduction | `claimReward` (deducts 10% fee, deposits to pool) |
-| **RelayerRewardsPool** | Registration, action tracking, reward distribution | `claimableRewards`, `isRewardClaimable`, `getRegisteredRelayers`, weights |
+| Contract               | Purpose                                            | Key Functions                                                                 |
+| ---------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------- |
+| **XAllocationVoting**  | Round info, auto-voting users, vote execution      | `castVoteOnBehalfOf`, `currentRoundId`, `hasVoted`, `AutoVotingToggled` event |
+| **VoterRewards**       | Reward claiming with fee deduction                 | `claimReward` (deducts 10% fee, deposits to pool)                             |
+| **RelayerRewardsPool** | Registration, action tracking, reward distribution | `claimableRewards`, `isRewardClaimable`, `getRegisteredRelayers`, weights     |
 
 Mainnet and testnet-staging addresses are in [`src/config.ts`](src/config.ts).
 
