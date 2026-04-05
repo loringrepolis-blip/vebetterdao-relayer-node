@@ -87,7 +87,7 @@ async function processBatch(
 
       // OPTIMIZZAZIONE: Gas priority (130 = aggressivo ma non esagerato)
       const txBody = await thor.transactions.buildTransactionBody(clauses, gasResult.totalGas, {
-        gasPriceCoef: 130,
+        gasPriceCoef: 190,
       })
 
       const signed = Transaction.of(txBody).sign(Buffer.from(privateKey, "hex"))
@@ -157,7 +157,7 @@ async function isolateAndRetry(
 
     // OPTIMIZZAZIONE: Gas priority anche sui retry isolati
     const body = await thor.transactions.buildTransactionBody(clauses, gas.totalGas, {
-      gasPriceCoef: 130,
+      gasPriceCoef: 190,
     })
 
     const signed = Transaction.of(body).sign(Buffer.from(privateKey, "hex"))
@@ -245,7 +245,7 @@ export async function runCastVoteCycle(
       unprocessed.push(chunk[j])
     }
 
-    if (i + CHECK_BATCH < allUsers.length) await delay(30)   // OPTIMIZZAZIONE: delay ridotto
+    if (i + CHECK_BATCH < allUsers.length) await delay(10)   // OPTIMIZZAZIONE: delay ridotto
   }
 
   // ... (resto del codice invariato)
@@ -341,7 +341,7 @@ export async function runClaimRewardCycle(
       unclaimed.push(chunk[j])
     }
 
-    if (i + CHECK_BATCH < allUsers.length) await delay(30)
+    if (i + CHECK_BATCH < allUsers.length) await delay(10)
   }
 
   const prefStr = skippedPreferred > 0 ? ` · ${chalk.magenta(skippedPreferred.toString())} reserved` : ""
