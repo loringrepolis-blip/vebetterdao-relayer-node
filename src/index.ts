@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-/**
- * VeBetterDAO Relayer Node - Versione ottimizzata per inizio round
- */
 import * as fs from "fs"
 import { ThorClient } from "@vechain/sdk-network"
 import { Address, HDKey } from "@vechain/sdk-core"
@@ -16,9 +13,8 @@ const ALLOWED_SECRETS = new Set(["mnemonic", "relayer_private_key"])
 
 function readSecret(name: string): string | undefined {
   if (!ALLOWED_SECRETS.has(name)) return undefined
-  const secretPath = `${SECRETS_DIR}/${name}`
   try {
-    return fs.readFileSync(secretPath, "utf-8").trim()
+    return fs.readFileSync(`${SECRETS_DIR}/${name}`, "utf-8").trim()
   } catch {
     return undefined
   }
@@ -44,11 +40,7 @@ function getWallet(): { walletAddress: string; privateKey: string } {
     process.exit(1)
   }
   const child = HDKey.fromMnemonic(words).deriveChild(0)
-  const raw = child.privateKey
-  if (!raw) {
-    console.error(chalk.red("Failed to derive private key from mnemonic"))
-    process.exit(1)
-  }
+  const raw = child.privateKey!
   return {
     walletAddress: Address.ofPublicKey(child.publicKey as Uint8Array).toString(),
     privateKey: Buffer.from(raw).toString("hex"),
@@ -69,19 +61,13 @@ function log(msg: string) {
   console.log(entry)
 }
 
-function logRaw(msg: string) {
-  activityLog.push(msg)
-  if (activityLog.length > MAX_LOG) activityLog.shift()
-  console.log(msg)
-}
-
 async function main() {
   const network = process.env.RELAYER_NETWORK || "mainnet"
   const nodeUrlOverride = process.env.NODE_URL?.trim()
   const config = getNetworkConfig(network, nodeUrlOverride)
   const { walletAddress, privateKey } = getWallet()
 
-  const batchSize = Math.max(1, parseInt(process.env.BATCH_SIZE || "100", 10) || 100)  // OTTIMIZZAZIONE: batch più grande
+  const batchSize = Math.max(1, parseInt(process.env.BATCH_SIZE || "120", 10))
   const dryRun = envBool("DRY_RUN")
   const runOnce = envBool("RUN_ONCE")
 
@@ -94,56 +80,38 @@ async function main() {
     nodeIndex = (nodeIndex + 1) % nodePool.length
     config.nodeUrl = nodePool[nodeIndex]
     thor = ThorClient.at(config.nodeUrl, { isPollingEnabled: false })
-    const host = new URL(config.nodeUrl).hostname
-    log(chalk.yellow(`Rotating to node: ${host}`))
+    log(chalk.yellow(`Rotating to node: ${new URL(config.nodeUrl).hostname}`))
   }
 
   let running = true
-  const shutdown = () => { running = false; log(chalk.yellow("Shutting down...")) }
-  process.on("SIGINT", shutdown)
-  process.on("SIGTERM", shutdown)
+  let pollMs = 15000
+  let fastModeUntil = 0
 
-  // OTTIMIZZAZIONE: polling dinamico
-  let pollMs = 15000          // normale: ogni 15 secondi
-  let fastModeUntil = 0       // timestamp fino a quando usare polling ultra-veloce
-
-  async function fetchInitialSummary() {
-    for (let i = 1; i <= 3; i++) {
-      try {
-        return await fetchSummary(thor, config, walletAddress)
-      } catch {
-        if (i === 3) throw new Error("Failed to fetch summary")
-        rotateNode()
-        await new Promise(r => setTimeout(r, 1500))
-      }
-    }
-  }
+  process.on("SIGINT", () => { running = false; log(chalk.yellow("Shutting down...")) })
+  process.on("SIGTERM", () => { running = false; log(chalk.yellow("Shutting down...")) })
 
   // Dashboard iniziale
   try {
-    const initial = await fetchInitialSummary()
+    const summary = await fetchSummary(thor, config, walletAddress)
     process.stdout.write("\x1B[2J\x1B[H")
-    console.log(renderSummary(initial))
-    console.log("")
-    console.log(chalk.bold("─── Activity Log ") + "─".repeat(49))
-  } catch {
+    console.log(renderSummary(summary))
+  } catch (e) {
     log(chalk.yellow("Could not fetch initial summary"))
   }
 
   while (running) {
-    const now = Date.now()
-    const isFastMode = now < fastModeUntil
+    const isFastMode = Date.now() < fastModeUntil
 
     let lastErr: unknown
     for (let attempt = 1; attempt <= nodePool.length; attempt++) {
       try {
         const summary = await fetchSummary(thor, config, walletAddress)
 
-        // Attiviamo fast mode quando inizia un nuovo round
+        // Attiva fast mode quando inizia un nuovo round
         if (summary.isRoundActive && fastModeUntil === 0) {
-          fastModeUntil = now + 15 * 60 * 1000   // 15 minuti di polling aggressivo
-          pollMs = 4000                          // ogni 4 secondi
-          log(chalk.green.bold("🚀 NEW ROUND DETECTED → Entering FAST MODE (4s polling)"))
+          fastModeUntil = Date.now() + 15 * 60 * 1000
+          pollMs = 4000
+          log(chalk.green.bold("🚀 NEW ROUND DETECTED → FAST MODE (4s polling for 15 min)"))
         }
 
         if (summary.isRoundActive) {
@@ -152,14 +120,13 @@ async function main() {
           renderCycleResult(voteResult).forEach(log)
         } else {
           log(chalk.dim("Round not active, skipping cast-vote"))
-          if (fastModeUntil > 0 && now > fastModeUntil) {
+          if (fastModeUntil > 0 && Date.now() > fastModeUntil) {
             fastModeUntil = 0
             pollMs = 15000
-            log(chalk.yellow("Fast mode ended → back to normal polling"))
+            log(chalk.yellow("Fast mode ended"))
           }
         }
 
-        logRaw("")
         logRaw(logSectionHeader("claim", summary.previousRoundId))
         const claimResult = await runClaimRewardCycle(thor, config, walletAddress, privateKey, batchSize, dryRun, log)
         renderCycleResult(claimResult).forEach(log)
@@ -168,16 +135,14 @@ async function main() {
         const updated = await fetchSummary(thor, config, walletAddress)
         process.stdout.write("\x1B[2J\x1B[H")
         console.log(renderSummary(updated))
-        console.log("")
         console.log(chalk.bold("─── Activity Log ") + "─".repeat(49))
-        for (const entry of activityLog.slice(-30)) console.log(entry)
+        activityLog.slice(-30).forEach(l => console.log(l))
 
         lastErr = undefined
         break
       } catch (err) {
         lastErr = err
         if (attempt < nodePool.length) {
-          log(chalk.yellow(`Cycle attempt ${attempt} failed, rotating node...`))
           rotateNode()
           await new Promise(r => setTimeout(r, 2000))
         }
@@ -185,7 +150,6 @@ async function main() {
     }
 
     if (lastErr) log(chalk.red(`Cycle error: ${lastErr}`))
-
     if (runOnce) break
 
     log(chalk.dim(`Next cycle in ${Math.round(pollMs/1000)}s...`))
@@ -193,9 +157,15 @@ async function main() {
   }
 }
 
+function logRaw(msg: string) {
+  activityLog.push(msg)
+  if (activityLog.length > MAX_LOG) activityLog.shift()
+  console.log(msg)
+}
+
 main().catch(err => {
   console.error(chalk.red("Fatal error:"), err)
   process.exit(1)
 })
 
-//Ottimizzazione finale: polling dinamico + fast mode all’inizio round
+//Final clean index.ts - dynamic polling + fast mode
