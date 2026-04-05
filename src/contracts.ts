@@ -14,7 +14,7 @@ const vrAbi = ABIContract.ofAbi(VoterRewards__factory.abi)
 
 const CALL_RETRIES = 3
 const CALL_RETRY_MS = 500
-const MAX_EVENTS = 5000   // OTTIMIZZAZIONE: aumentato da 1000 → 5000 (fetch log molto più veloce)
+const MAX_EVENTS = 8000   // OTTIMIZZAZIONE: aumentato da 1000 → 5000 (fetch log molto più veloce)
 
 // ── Helper per chiamate ─────────────────────────────────────
 async function call(thor: ThorClient, address: string, abi: any, method: string, args: any[] = []): Promise<any[]> {
@@ -72,7 +72,7 @@ export async function getPreferredRelayersForUsers(
   if (users.length === 0) return result
 
   const fn = rrpAbi.getFunction("getPreferredRelayer")
-  const BATCH = 150
+  const BATCH = 200
 
   for (let i = 0; i < users.length; i += BATCH) {
     const chunk = users.slice(i, i + BATCH)
