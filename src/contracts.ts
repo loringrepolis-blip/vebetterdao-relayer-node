@@ -192,3 +192,5 @@ export async function getAlreadySkippedVotersForRound(...) { ... }   // lascia i
 export async function getAlreadyClaimedForRound(...) { ... }       // lascia invariata
 export async function getPreferredRelayerUserCount(...) { ... }     // lascia invariata
 export async function fetchSummary(...) { ... }                     // lascia invariata
+
+//Ottimizzazione cache auto-voting users + MAX_EVENTS 5000
