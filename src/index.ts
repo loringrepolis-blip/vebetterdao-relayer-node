@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+/**
+ * VeBetterDAO Relayer Node - Versione definitiva (pulita)
+ */
 import * as fs from "fs"
 import { ThorClient } from "@vechain/sdk-network"
 import { Address, HDKey } from "@vechain/sdk-core"
@@ -61,6 +64,12 @@ function log(msg: string) {
   console.log(entry)
 }
 
+function logRaw(msg: string) {
+  activityLog.push(msg)
+  if (activityLog.length > MAX_LOG) activityLog.shift()
+  console.log(msg)
+}
+
 async function main() {
   const network = process.env.RELAYER_NETWORK || "mainnet"
   const nodeUrlOverride = process.env.NODE_URL?.trim()
@@ -84,19 +93,32 @@ async function main() {
   }
 
   let running = true
-  let pollMs = 15000
-  let fastModeUntil = 0
+  let pollMs = 15000          // polling normale
+  let fastModeUntil = 0       // timestamp per fast mode
 
   process.on("SIGINT", () => { running = false; log(chalk.yellow("Shutting down...")) })
   process.on("SIGTERM", () => { running = false; log(chalk.yellow("Shutting down...")) })
 
-  // Dashboard iniziale
-  try {
-    const summary = await fetchSummary(thor, config, walletAddress)
+  // FIX DEFINITIVO: fetch iniziale molto più robusto e silenzioso
+  let initialSummary = null
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      initialSummary = await fetchSummary(thor, config, walletAddress)
+      break
+    } catch {
+      if (attempt < 5) {
+        rotateNode()
+        await new Promise(r => setTimeout(r, 1200))
+      }
+    }
+  }
+
+  // Dashboard iniziale (senza warning giallo se fallisce)
+  if (initialSummary) {
     process.stdout.write("\x1B[2J\x1B[H")
-    console.log(renderSummary(summary))
-  } catch (e) {
-    log(chalk.yellow("Could not fetch initial summary"))
+    console.log(renderSummary(initialSummary))
+  } else {
+    console.log(chalk.dim("Initial summary not available yet (will load in first cycle)"))
   }
 
   while (running) {
@@ -107,7 +129,7 @@ async function main() {
       try {
         const summary = await fetchSummary(thor, config, walletAddress)
 
-        // Attiva fast mode quando inizia un nuovo round
+        // Attiva fast mode all'inizio di un nuovo round
         if (summary.isRoundActive && fastModeUntil === 0) {
           fastModeUntil = Date.now() + 15 * 60 * 1000
           pollMs = 4000
@@ -157,15 +179,9 @@ async function main() {
   }
 }
 
-function logRaw(msg: string) {
-  activityLog.push(msg)
-  if (activityLog.length > MAX_LOG) activityLog.shift()
-  console.log(msg)
-}
-
 main().catch(err => {
   console.error(chalk.red("Fatal error:"), err)
   process.exit(1)
 })
 
-//Final clean index.ts - dynamic polling + fast mode
+//Final fix - initial summary pulito e robusto
