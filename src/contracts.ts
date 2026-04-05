@@ -72,7 +72,7 @@ export async function getPreferredRelayersForUsers(
   if (users.length === 0) return result
 
   const fn = rrpAbi.getFunction("getPreferredRelayer")
-  const BATCH = 250
+  const BATCH = 350
 
   for (let i = 0; i < users.length; i += BATCH) {
     const chunk = users.slice(i, i + BATCH)
