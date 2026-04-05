@@ -72,7 +72,7 @@ export async function getPreferredRelayersForUsers(
   if (users.length === 0) return result
 
   const fn = rrpAbi.getFunction("getPreferredRelayer")
-  const BATCH = 200
+  const BATCH = 250
 
   for (let i = 0; i < users.length; i += BATCH) {
     const chunk = users.slice(i, i + BATCH)
@@ -512,3 +512,5 @@ export async function getRelayerWeightedActions(thor: ThorClient, addr: string, 
   const r = await call(thor, addr, rrpAbi, "totalRelayerWeightedActions", [relayer, roundId])
   return BigInt(r[0])
 }
+
+//Increase preferred relayers batch to 250 for faster startup
