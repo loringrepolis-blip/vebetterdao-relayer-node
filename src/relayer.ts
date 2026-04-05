@@ -20,7 +20,6 @@ import {
 
 const xavAbi = ABIContract.ofAbi(XAllocationVoting__factory.abi)
 const vrAbi = ABIContract.ofAbi(VoterRewards__factory.abi)
-const MAX_GAS = 40_000_000
 
 // ── Clause builders ─────────────────────────────────────────
 function buildCastVoteClause(contractAddress: string, roundId: number, user: string): Clause {
@@ -85,9 +84,9 @@ async function processBatch(
         continue
       }
 
-      // OPTIMIZZAZIONE: Gas priority (130 = aggressivo ma non esagerato)
+      // AGGRESSIVO: priorità alta sulle transazioni
       const txBody = await thor.transactions.buildTransactionBody(clauses, gasResult.totalGas, {
-        gasPriceCoef: 190,
+        gasPriceCoef: 200,
       })
 
       const signed = Transaction.of(txBody).sign(Buffer.from(privateKey, "hex"))
@@ -107,7 +106,7 @@ async function processBatch(
       log(`Batch ${batchNum}: error - ${msg.slice(0, 100)}`)
       await isolateAndRetry(thor, batch, clauseBuilder, walletAddress, privateKey, dryRun, outcome, log)
     }
-    await delay(100)
+    await delay(80)
   }
   return outcome
 }
@@ -155,9 +154,8 @@ async function isolateAndRetry(
       return
     }
 
-    // OPTIMIZZAZIONE: Gas priority anche sui retry isolati
     const body = await thor.transactions.buildTransactionBody(clauses, gas.totalGas, {
-      gasPriceCoef: 190,
+      gasPriceCoef: 200,   // AGGRESSIVO anche sui retry
     })
 
     const signed = Transaction.of(body).sign(Buffer.from(privateKey, "hex"))
@@ -180,7 +178,7 @@ function delay(ms: number) {
   return new Promise((r) => setTimeout(r, ms))
 }
 
-// ── Public cycle runners ────────────────────────────────────
+// ── runCastVoteCycle ────────────────────────────────────────
 export async function runCastVoteCycle(
   thor: ThorClient,
   config: NetworkConfig,
@@ -201,16 +199,9 @@ export async function runCastVoteCycle(
     return { phase: "vote", roundId, totalUsers: 0, successful: 0, failed: [], transient: [], txIds: [], dryRun }
   }
 
-  // ... (resto del codice invariato fino ai check)
   const best = await thor.blocks.getBestBlockCompressed()
   const latestBlock = best?.number ?? snapshot
-  const skippedSet = await getAlreadySkippedVotersForRound(
-    thor,
-    config.xAllocationVotingAddress,
-    roundId,
-    snapshot,
-    latestBlock,
-  )
+  const skippedSet = await getAlreadySkippedVotersForRound(thor, config.xAllocationVotingAddress, roundId, snapshot, latestBlock)
 
   const earlyAccessBlocks = await getEarlyAccessBlocks(thor, config.relayerRewardsPoolAddress)
   const voteEarlyAccessEnd = snapshot + Number(earlyAccessBlocks)
@@ -219,20 +210,16 @@ export async function runCastVoteCycle(
   const preferredMap = await getPreferredRelayersForUsers(thor, config.relayerRewardsPoolAddress, allUsers, log)
   const myAddress = walletAddress.toLowerCase()
 
-  // ... (calcolo preferiti invariato)
-
   log("Checking vote status...")
 
   const unprocessed: string[] = []
-  let voted = 0
-  let ineligible = 0
-  let skippedPreferred = 0
+  let voted = 0, ineligible = 0, skippedPreferred = 0
 
-  // OPTIMIZZAZIONE 1: Parallelizzazione aggressiva
-  const CHECK_BATCH = 200
+  // OTTIMIZZAZIONE AGGRESSIVA
+  const CHECK_BATCH = 300
   for (let i = 0; i < allUsers.length; i += CHECK_BATCH) {
     const chunk = allUsers.slice(i, i + CHECK_BATCH)
-    const checks = await Promise.all(chunk.map((u) => hasVoted(thor, config.xAllocationVotingAddress, roundId, u)))
+    const checks = await Promise.all(chunk.map(u => hasVoted(thor, config.xAllocationVotingAddress, roundId, u)))
 
     for (let j = 0; j < chunk.length; j++) {
       const user = chunk[j].toLowerCase()
@@ -245,12 +232,11 @@ export async function runCastVoteCycle(
       unprocessed.push(chunk[j])
     }
 
-    if (i + CHECK_BATCH < allUsers.length) await delay(10)   // OPTIMIZZAZIONE: delay ridotto
+    if (i + CHECK_BATCH < allUsers.length) await delay(8)
   }
 
-  // ... (resto del codice invariato)
-  const prefStr = skippedPreferred > 0 ? ` · ${chalk.magenta(skippedPreferred.toString())} reserved` : ""
-  log(`${chalk.green(voted.toString())} voted · ${chalk.yellow(ineligible.toString())} ineligible · ${chalk.cyan(unprocessed.length.toString())} pending${prefStr}`)
+  const prefStr = skippedPreferred > 0 ? ` · ${chalk.magenta(skippedPreferred)} reserved` : ""
+  log(`${chalk.green(voted)} voted · ${chalk.yellow(ineligible)} ineligible · ${chalk.cyan(unprocessed.length)} pending${prefStr}`)
 
   if (unprocessed.length === 0) {
     return { phase: "vote", roundId, totalUsers: allUsers.length, successful: 0, failed: [], transient: [], txIds: [], dryRun }
@@ -271,7 +257,7 @@ export async function runCastVoteCycle(
   }
 }
 
-// La funzione runClaimRewardCycle è identica nella struttura (stesse ottimizzazioni)
+// ── runClaimRewardCycle ─────────────────────────────────────
 export async function runClaimRewardCycle(
   thor: ThorClient,
   config: NetworkConfig,
@@ -281,9 +267,6 @@ export async function runClaimRewardCycle(
   dryRun: boolean,
   log: LogFn,
 ): Promise<CycleResult> {
-  // ... (tutto il codice della funzione originale rimane identico fino a "Checking claim status...")
-  // Ho applicato esattamente le stesse ottimizzazioni di sopra (CHECK_BATCH = 200 e delay(30))
-
   const currentRoundId = await getCurrentRoundId(thor, config.xAllocationVotingAddress)
   const previousRoundId = currentRoundId - 1
   if (previousRoundId <= 0) {
@@ -302,13 +285,7 @@ export async function runClaimRewardCycle(
 
   const best = await thor.blocks.getBestBlockCompressed()
   const latestBlock = best?.number ?? deadline
-  const claimedSet = await getAlreadyClaimedForRound(
-    thor,
-    config.voterRewardsAddress,
-    previousRoundId,
-    deadline,
-    latestBlock,
-  )
+  const claimedSet = await getAlreadyClaimedForRound(thor, config.voterRewardsAddress, previousRoundId, deadline, latestBlock)
 
   const earlyAccessBlocks = await getEarlyAccessBlocks(thor, config.relayerRewardsPoolAddress)
   const claimEarlyAccessEnd = deadline + Number(earlyAccessBlocks)
@@ -324,11 +301,11 @@ export async function runClaimRewardCycle(
   let alreadyClaimed = 0
   let skippedPreferred = 0
 
-  // OPTIMIZZAZIONE 1: Parallelizzazione aggressiva
-  const CHECK_BATCH = 200
+  // OTTIMIZZAZIONE AGGRESSIVA (stessa di sopra)
+  const CHECK_BATCH = 300
   for (let i = 0; i < allUsers.length; i += CHECK_BATCH) {
     const chunk = allUsers.slice(i, i + CHECK_BATCH)
-    const checks = await Promise.all(chunk.map((u) => hasVoted(thor, config.xAllocationVotingAddress, previousRoundId, u)))
+    const checks = await Promise.all(chunk.map(u => hasVoted(thor, config.xAllocationVotingAddress, previousRoundId, u)))
 
     for (let j = 0; j < chunk.length; j++) {
       const user = chunk[j].toLowerCase()
@@ -341,11 +318,11 @@ export async function runClaimRewardCycle(
       unclaimed.push(chunk[j])
     }
 
-    if (i + CHECK_BATCH < allUsers.length) await delay(10)
+    if (i + CHECK_BATCH < allUsers.length) await delay(8)
   }
 
-  const prefStr = skippedPreferred > 0 ? ` · ${chalk.magenta(skippedPreferred.toString())} reserved` : ""
-  log(`${chalk.green(alreadyClaimed.toString())} claimed · ${chalk.red(didNotVote.toString())} did not vote · ${chalk.cyan(unclaimed.length.toString())} pending${prefStr}`)
+  const prefStr = skippedPreferred > 0 ? ` · ${chalk.magenta(skippedPreferred)} reserved` : ""
+  log(`${chalk.green(alreadyClaimed)} claimed · ${chalk.red(didNotVote)} did not vote · ${chalk.cyan(unclaimed.length)} pending${prefStr}`)
 
   if (unclaimed.length === 0) {
     return { phase: "claim", roundId: previousRoundId, totalUsers: allUsers.length, successful: 0, failed: [], transient: [], txIds: [], dryRun }
@@ -366,4 +343,4 @@ export async function runClaimRewardCycle(
   }
 }
 
-//Ottimizzazioni velocità: parallel hasVoted + gas priority
+//Final aggressive optimization - CHECK_BATCH 300 + gas 200 + delay 8ms
