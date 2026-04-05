@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * VeBetterDAO Relayer Node - Versione ottimizzata
+ * VeBetterDAO Relayer Node - Versione ottimizzata per inizio round
  */
 import * as fs from "fs"
 import { ThorClient } from "@vechain/sdk-network"
@@ -40,7 +40,7 @@ function getWallet(): { walletAddress: string; privateKey: string } {
   const mnemonic = envOrSecret("MNEMONIC", "mnemonic")
   const words = mnemonic?.split(/\s+/)
   if (!words?.length) {
-    console.error(chalk.red("Set MNEMONIC or RELAYER_PRIVATE_KEY (env var or Docker secret)"))
+    console.error(chalk.red("Set MNEMONIC or RELAYER_PRIVATE_KEY"))
     process.exit(1)
   }
   const child = HDKey.fromMnemonic(words).deriveChild(0)
@@ -81,9 +81,8 @@ async function main() {
   const config = getNetworkConfig(network, nodeUrlOverride)
   const { walletAddress, privateKey } = getWallet()
 
-  const batchSize = Math.max(1, parseInt(process.env.BATCH_SIZE || "50", 10) || 50)
+  const batchSize = Math.max(1, parseInt(process.env.BATCH_SIZE || "100", 10) || 100)  // OTTIMIZZAZIONE: batch più grande
   const dryRun = envBool("DRY_RUN")
-  const pollMs = Math.max(60_000, parseInt(process.env.POLL_INTERVAL_MS || "10000", 10) || 10_000)
   const runOnce = envBool("RUN_ONCE")
 
   const nodePool = nodeUrlOverride ? [nodeUrlOverride] : getNodePool(network)
@@ -100,50 +99,52 @@ async function main() {
   }
 
   let running = true
-  let forceExit = false
-  const shutdown = () => {
-    if (forceExit) process.exit(1)
-    forceExit = true
-    running = false
-    log(chalk.yellow("Shutting down after current operation..."))
-  }
+  const shutdown = () => { running = false; log(chalk.yellow("Shutting down...")) }
   process.on("SIGINT", shutdown)
   process.on("SIGTERM", shutdown)
 
-  // FIX: Initial summary con retry (risolve il warning "Could not fetch initial summary")
+  // OTTIMIZZAZIONE: polling dinamico
+  let pollMs = 15000          // normale: ogni 15 secondi
+  let fastModeUntil = 0       // timestamp fino a quando usare polling ultra-veloce
+
   async function fetchInitialSummary() {
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let i = 1; i <= 3; i++) {
       try {
-        const summary = await fetchSummary(thor, config, walletAddress)
-        return summary
-      } catch (err) {
-        if (attempt === 3) throw err
-        await new Promise(r => setTimeout(r, 1500))
+        return await fetchSummary(thor, config, walletAddress)
+      } catch {
+        if (i === 3) throw new Error("Failed to fetch summary")
         rotateNode()
+        await new Promise(r => setTimeout(r, 1500))
       }
     }
-    throw new Error("Failed to fetch initial summary")
   }
 
-  // Show summary immediately on startup
+  // Dashboard iniziale
   try {
     const initial = await fetchInitialSummary()
     process.stdout.write("\x1B[2J\x1B[H")
     console.log(renderSummary(initial))
     console.log("")
     console.log(chalk.bold("─── Activity Log ") + "─".repeat(49))
-  } catch (err) {
-    log(chalk.yellow("Could not fetch initial summary (will retry in cycles)"))
+  } catch {
+    log(chalk.yellow("Could not fetch initial summary"))
   }
 
-  const CYCLE_RETRIES = nodePool.length
-  const CYCLE_RETRY_MS = 3000
-
   while (running) {
+    const now = Date.now()
+    const isFastMode = now < fastModeUntil
+
     let lastErr: unknown
-    for (let attempt = 1; attempt <= CYCLE_RETRIES; attempt++) {
+    for (let attempt = 1; attempt <= nodePool.length; attempt++) {
       try {
         const summary = await fetchSummary(thor, config, walletAddress)
+
+        // Attiviamo fast mode quando inizia un nuovo round
+        if (summary.isRoundActive && fastModeUntil === 0) {
+          fastModeUntil = now + 15 * 60 * 1000   // 15 minuti di polling aggressivo
+          pollMs = 4000                          // ogni 4 secondi
+          log(chalk.green.bold("🚀 NEW ROUND DETECTED → Entering FAST MODE (4s polling)"))
+        }
 
         if (summary.isRoundActive) {
           logRaw(logSectionHeader("vote", summary.currentRoundId))
@@ -151,6 +152,11 @@ async function main() {
           renderCycleResult(voteResult).forEach(log)
         } else {
           log(chalk.dim("Round not active, skipping cast-vote"))
+          if (fastModeUntil > 0 && now > fastModeUntil) {
+            fastModeUntil = 0
+            pollMs = 15000
+            log(chalk.yellow("Fast mode ended → back to normal polling"))
+          }
         }
 
         logRaw("")
@@ -170,24 +176,19 @@ async function main() {
         break
       } catch (err) {
         lastErr = err
-        if (attempt < CYCLE_RETRIES) {
-          log(chalk.yellow(`Cycle attempt ${attempt}/${CYCLE_RETRIES} failed, retrying in ${CYCLE_RETRY_MS / 1000}s...`))
+        if (attempt < nodePool.length) {
+          log(chalk.yellow(`Cycle attempt ${attempt} failed, rotating node...`))
           rotateNode()
-          await new Promise(r => setTimeout(r, CYCLE_RETRY_MS))
+          await new Promise(r => setTimeout(r, 2000))
         }
       }
     }
 
-    if (lastErr) {
-      log(chalk.red(`Cycle error: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`))
-    }
+    if (lastErr) log(chalk.red(`Cycle error: ${lastErr}`))
 
-    if (runOnce) {
-      log("Run once complete. Exiting.")
-      break
-    }
+    if (runOnce) break
 
-    log(chalk.dim(`Next cycle in ${(pollMs / 1000)}s...`))
+    log(chalk.dim(`Next cycle in ${Math.round(pollMs/1000)}s...`))
     await new Promise(r => setTimeout(r, pollMs))
   }
 }
@@ -197,4 +198,4 @@ main().catch(err => {
   process.exit(1)
 })
 
-//Fix initial summary + miglioramenti avvio
+//Ottimizzazione finale: polling dinamico + fast mode all’inizio round
