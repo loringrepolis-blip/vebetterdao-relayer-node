@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 /**
- * VeBetterDAO Relayer Node - PRIORITY VOTE MODE (versione definitiva e compilabile)
- *
- * Quando si apre un nuovo round → fa SOLO il voto e salta i claim
+ * VeBetterDAO Relayer Node - PRIORITY VOTE MODE (versione definitiva compatibile)
  */
 
 import * as fs from "fs"
@@ -43,15 +41,15 @@ function getWallet() {
 }
 
 async function main() {
-  const config = getNetworkConfig("mainnet")               // forza mainnet
+  const config = getNetworkConfig("mainnet")
   const wallet = getWallet()
   const privateKey = wallet.privateKey
   const walletAddress = Address.of(privateKey).toString()
 
-  // ── Node pool (da config.ts) ─────────────────────────────
-  let nodes = getNodePool("mainnet")
+  // ── Gestione nodi semplice (compatibile con il tuo config.ts) ─────────────────
+  const nodes = getNodePool("mainnet")
   let nodeIndex = 0
-  let thor = ThorClient.at(nodes[nodeIndex])               // crea ThorClient dal primo nodo
+  let thor = ThorClient.at(nodes[nodeIndex])
 
   const batchSize = parseInt(process.env.BATCH_SIZE || "150")
   const dryRun = process.env.DRY_RUN === "1" || process.env.DRY_RUN === "true"
@@ -66,7 +64,6 @@ async function main() {
     try {
       let summary = await fetchSummary(thor, config, walletAddress)
 
-      // ── LOGICA PRIORITÀ VOTO ─────────────────────────────
       const isNewRound = summary.isRoundActive && !currentRoundVoted
 
       if (isNewRound) {
@@ -83,14 +80,12 @@ async function main() {
         console.log(chalk.dim("Round not active, skipping cast-vote"))
       }
 
-      // Claim solo se NON è un nuovo round
       if (!isNewRound && summary.previousRoundId > 0) {
         logSectionHeader("claim", summary.previousRoundId)
         const claimResult = await runClaimRewardCycle(thor, config, walletAddress, privateKey, batchSize, dryRun, console.log)
         renderCycleResult(claimResult).forEach(console.log)
       }
 
-      // Aggiorna summary
       summary = await fetchSummary(thor, config, walletAddress)
       renderSummary(summary)
 
@@ -108,10 +103,10 @@ async function main() {
 
     } catch (err) {
       console.log(chalk.red(`Cycle error: ${err instanceof Error ? err.message : String(err)}`))
-      // Rotazione nodo
+      // Rotazione manuale nodo
       nodeIndex = (nodeIndex + 1) % nodes.length
       thor = ThorClient.at(nodes[nodeIndex])
-      console.log(chalk.yellow(`→ Switched to node ${nodes[nodeIndex]}`))
+      console.log(chalk.yellow(`→ Switched to node: ${nodes[nodeIndex]}`))
       await new Promise(r => setTimeout(r, 3000))
     }
   }
@@ -119,4 +114,4 @@ async function main() {
 
 main().catch(console.error)
 
-//Final fix index.ts - priority vote + node rotation compatible
+//Final index.ts - priority vote + simple node rotation
