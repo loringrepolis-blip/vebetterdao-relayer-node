@@ -18,6 +18,9 @@ import { renderSummary, renderCycleResult, logSectionHeader, timestamp } from ".
 const SECRETS_DIR = "/run/secrets"
 const ALLOWED_SECRETS = new Set(["mnemonic", "relayer_private_key"])
 
+/**
+ * Read a Docker secret file.
+ */
 function readSecret(name: string): string | undefined {
   if (!ALLOWED_SECRETS.has(name)) return undefined
   const secretPath = `${SECRETS_DIR}/${name}`
@@ -55,7 +58,6 @@ async function main() {
   const runOnce = process.env.RUN_ONCE === "1" || process.env.RUN_ONCE === "true"
 
   let lastErr: any
-  let fastModeUntil = 0
   let pollMs = pollMsDefault
   let currentRoundVoted = false   // ← Nuova logica: priorità voto
 
@@ -117,4 +119,4 @@ async function main() {
 
 main().catch(console.error)
 
-//Add voting priority mode - skip claims at new round start
+//Apply vote-first priority logic - index.ts
