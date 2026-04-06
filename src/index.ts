@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * VeBetterDAO Relayer Node - PRIORITY VOTE MODE (versione definitiva compatibile)
+ * VeBetterDAO Relayer Node - PRIORITY VOTE MODE (versione ultra-semplice e compatibile)
  */
 
 import * as fs from "fs"
@@ -46,10 +46,9 @@ async function main() {
   const privateKey = wallet.privateKey
   const walletAddress = Address.of(privateKey).toString()
 
-  // ── Gestione nodi semplice (compatibile con il tuo config.ts) ─────────────────
+  // Nodo semplice (primo nodo della lista)
   const nodes = getNodePool("mainnet")
-  let nodeIndex = 0
-  let thor = ThorClient.at(nodes[nodeIndex])
+  const thor = ThorClient.at(nodes[0])   // usiamo solo il primo nodo per semplicità
 
   const batchSize = parseInt(process.env.BATCH_SIZE || "150")
   const dryRun = process.env.DRY_RUN === "1" || process.env.DRY_RUN === "true"
@@ -103,11 +102,7 @@ async function main() {
 
     } catch (err) {
       console.log(chalk.red(`Cycle error: ${err instanceof Error ? err.message : String(err)}`))
-      // Rotazione manuale nodo
-      nodeIndex = (nodeIndex + 1) % nodes.length
-      thor = ThorClient.at(nodes[nodeIndex])
-      console.log(chalk.yellow(`→ Switched to node: ${nodes[nodeIndex]}`))
-      await new Promise(r => setTimeout(r, 3000))
+      await new Promise(r => setTimeout(r, 10000)) // aspetta 10 secondi in caso di errore
     }
   }
 }
