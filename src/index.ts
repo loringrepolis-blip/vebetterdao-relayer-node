@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * VeBetterDAO Relayer Node - Versione con PRIORITÀ VOTO (corretto e compilabile)
+ * VeBetterDAO Relayer Node - Versione con PRIORITÀ VOTO (compilabile)
  *
  * Quando si apre un nuovo round: fa SOLO il casting dei voti
  * Solo dopo aver finito il voto passa ai claim del round precedente
@@ -45,7 +45,7 @@ function getWallet() {
 
 async function main() {
   const config = getNetworkConfig()
-  const wallet = getWallet()                    // ← chiamato UNA sola volta
+  const wallet = getWallet()
   const privateKey = wallet.privateKey
   const walletAddress = Address.of(privateKey).toString()
 
@@ -57,7 +57,7 @@ async function main() {
   const pollMs = parseInt(process.env.POLL_INTERVAL_MS || "10000")
   const runOnce = process.env.RUN_ONCE === "1" || process.env.RUN_ONCE === "true"
 
-  let currentRoundVoted = false   // ← Nuova logica: priorità voto
+  let currentRoundVoted = false
 
   console.log(chalk.bold.green("🚀 VeBetterDAO Relayer Node v1.1.0 - PRIORITY VOTE MODE"))
 
@@ -65,7 +65,6 @@ async function main() {
     try {
       let summary = await fetchSummary(thor, config, walletAddress)
 
-      // ── NUOVA LOGICA PRIORITÀ VOTO ─────────────────────────────
       const isNewRound = summary.isRoundActive && !currentRoundVoted
 
       if (isNewRound) {
@@ -82,18 +81,15 @@ async function main() {
         console.log(chalk.dim("Round not active, skipping cast-vote"))
       }
 
-      // Claim solo dopo aver votato (o se non è un nuovo round)
       if (!isNewRound && summary.previousRoundId > 0) {
         logSectionHeader("claim", summary.previousRoundId)
         const claimResult = await runClaimRewardCycle(thor, config, walletAddress, privateKey, batchSize, dryRun, console.log)
         renderCycleResult(claimResult).forEach(console.log)
       }
 
-      // Aggiorna summary finale
       summary = await fetchSummary(thor, config, walletAddress)
       renderSummary(summary)
 
-      // Reset flag quando il round finisce
       if (!summary.isRoundActive) {
         currentRoundVoted = false
       }
@@ -114,6 +110,6 @@ async function main() {
   }
 }
 
-main().catch(console.error)o
+main().catch(console.error)
 
-//Fix: corrected index.ts for TypeScript + vote-first priority
+//Fix index.ts - corrected TS syntax + vote-first priority
