@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 /**
- * VeBetterDAO Relayer Node - Versione definitiva (pulita)
+ * VeBetterDAO Relayer Node - Versione con PRIORITÀ VOTO
+ *
+ * Quando si apre un nuovo round: fa SOLO il casting dei voti
+ * Solo dopo aver finito il voto passa ai claim del round precedente
  */
+
 import * as fs from "fs"
 import { ThorClient } from "@vechain/sdk-network"
 import { Address, HDKey } from "@vechain/sdk-core"
@@ -16,172 +20,101 @@ const ALLOWED_SECRETS = new Set(["mnemonic", "relayer_private_key"])
 
 function readSecret(name: string): string | undefined {
   if (!ALLOWED_SECRETS.has(name)) return undefined
+  const secretPath = `${SECRETS_DIR}/${name}`
   try {
-    return fs.readFileSync(`${SECRETS_DIR}/${name}`, "utf-8").trim()
+    return fs.readFileSync(secretPath, "utf8").trim()
   } catch {
     return undefined
   }
 }
 
-function envOrSecret(envKey: string, secretName: string): string | undefined {
-  return process.env[envKey]?.trim() || readSecret(secretName)
-}
+function getWallet() {
+  const mnemonic = process.env.MNEMONIC || readSecret("mnemonic")
+  const privateKey = process.env.RELAYER_PRIVATE_KEY || readSecret("relayer_private_key")
 
-function getWallet(): { walletAddress: string; privateKey: string } {
-  const pk = envOrSecret("RELAYER_PRIVATE_KEY", "relayer_private_key")
-  if (pk) {
-    const clean = pk.startsWith("0x") ? pk.slice(2) : pk
-    return {
-      walletAddress: Address.ofPrivateKey(Buffer.from(clean, "hex")).toString(),
-      privateKey: clean,
-    }
+  if (privateKey) {
+    return { privateKey: privateKey.replace("0x", ""), mnemonic: undefined }
   }
-  const mnemonic = envOrSecret("MNEMONIC", "mnemonic")
-  const words = mnemonic?.split(/\s+/)
-  if (!words?.length) {
-    console.error(chalk.red("Set MNEMONIC or RELAYER_PRIVATE_KEY"))
-    process.exit(1)
+  if (mnemonic) {
+    const hdKey = HDKey.fromMnemonic(mnemonic.split(" "))
+    const child = hdKey.derive(0)
+    return { privateKey: child.privateKey!.toString("hex"), mnemonic }
   }
-  const child = HDKey.fromMnemonic(words).deriveChild(0)
-  const raw = child.privateKey!
-  return {
-    walletAddress: Address.ofPublicKey(child.publicKey as Uint8Array).toString(),
-    privateKey: Buffer.from(raw).toString("hex"),
-  }
-}
-
-function envBool(key: string): boolean {
-  return /^(1|true|yes)$/i.test(process.env[key] || "")
-}
-
-const activityLog: string[] = []
-const MAX_LOG = 200
-
-function log(msg: string) {
-  const entry = `${timestamp()} ${msg}`
-  activityLog.push(entry)
-  if (activityLog.length > MAX_LOG) activityLog.shift()
-  console.log(entry)
-}
-
-function logRaw(msg: string) {
-  activityLog.push(msg)
-  if (activityLog.length > MAX_LOG) activityLog.shift()
-  console.log(msg)
+  throw new Error("❌ Imposta RELAYER_PRIVATE_KEY o MNEMONIC")
 }
 
 async function main() {
-  const network = process.env.RELAYER_NETWORK || "mainnet"
-  const nodeUrlOverride = process.env.NODE_URL?.trim()
-  const config = getNetworkConfig(network, nodeUrlOverride)
-  const { walletAddress, privateKey } = getWallet()
+  const config = getNetworkConfig()
+  const { privateKey } = getWallet()
+  const thorPool = getNodePool(config.nodeUrl)
+  let thor = thorPool.getCurrent()
 
-  const batchSize = Math.max(1, parseInt(process.env.BATCH_SIZE || "120", 10))
-  const dryRun = envBool("DRY_RUN")
-  const runOnce = envBool("RUN_ONCE")
+  const batchSize = parseInt(process.env.BATCH_SIZE || "150")
+  const dryRun = process.env.DRY_RUN === "1" || process.env.DRY_RUN === "true"
+  const pollMsDefault = parseInt(process.env.POLL_INTERVAL_MS || "10000")
+  const runOnce = process.env.RUN_ONCE === "1" || process.env.RUN_ONCE === "true"
 
-  const nodePool = nodeUrlOverride ? [nodeUrlOverride] : getNodePool(network)
-  let nodeIndex = 0
-  let thor = ThorClient.at(config.nodeUrl, { isPollingEnabled: false })
+  let lastErr: any
+  let fastModeUntil = 0
+  let pollMs = pollMsDefault
+  let currentRoundVoted = false   // ← Nuova logica: priorità voto
 
-  function rotateNode() {
-    if (nodePool.length <= 1) return
-    nodeIndex = (nodeIndex + 1) % nodePool.length
-    config.nodeUrl = nodePool[nodeIndex]
-    thor = ThorClient.at(config.nodeUrl, { isPollingEnabled: false })
-    log(chalk.yellow(`Rotating to node: ${new URL(config.nodeUrl).hostname}`))
-  }
+  console.log(chalk.bold.green("🚀 VeBetterDAO Relayer Node v1.1.0 - PRIORITY VOTE MODE"))
 
-  let running = true
-  let pollMs = 15000          // polling normale
-  let fastModeUntil = 0       // timestamp per fast mode
-
-  process.on("SIGINT", () => { running = false; log(chalk.yellow("Shutting down...")) })
-  process.on("SIGTERM", () => { running = false; log(chalk.yellow("Shutting down...")) })
-
-  // FIX DEFINITIVO: fetch iniziale molto più robusto e silenzioso
-  let initialSummary = null
-  for (let attempt = 1; attempt <= 5; attempt++) {
+  while (true) {
     try {
-      initialSummary = await fetchSummary(thor, config, walletAddress)
-      break
-    } catch {
-      if (attempt < 5) {
-        rotateNode()
-        await new Promise(r => setTimeout(r, 1200))
+      let summary = await fetchSummary(thor, config, Address.of(getWallet().privateKey).toString())
+
+      // ── NUOVA LOGICA PRIORITÀ VOTO ─────────────────────────────
+      const isNewRound = summary.isRoundActive && !currentRoundVoted
+
+      if (isNewRound) {
+        logSectionHeader("vote", summary.currentRoundId)
+        console.log(chalk.green.bold("🔥 NEW ROUND DETECTED → VOTING PRIORITY MODE (skipping claims)"))
+        const voteResult = await runCastVoteCycle(thor, config, Address.of(getWallet().privateKey).toString(), privateKey, batchSize, dryRun, console.log)
+        renderCycleResult(voteResult).forEach(console.log)
+        currentRoundVoted = true
+      } else if (summary.isRoundActive) {
+        logSectionHeader("vote", summary.currentRoundId)
+        const voteResult = await runCastVoteCycle(thor, config, Address.of(getWallet().privateKey).toString(), privateKey, batchSize, dryRun, console.log)
+        renderCycleResult(voteResult).forEach(console.log)
+      } else {
+        console.log(chalk.dim("Round not active, skipping cast-vote"))
       }
-    }
-  }
 
-  // Dashboard iniziale (senza warning giallo se fallisce)
-  if (initialSummary) {
-    process.stdout.write("\x1B[2J\x1B[H")
-    console.log(renderSummary(initialSummary))
-  } else {
-    console.log(chalk.dim("Initial summary not available yet (will load in first cycle)"))
-  }
+      // Claim solo dopo aver votato o se non è un nuovo round
+      if (!isNewRound && summary.previousRoundId > 0) {
+        logSectionHeader("claim", summary.previousRoundId)
+        const claimResult = await runClaimRewardCycle(thor, config, Address.of(getWallet().privateKey).toString(), privateKey, batchSize, dryRun, console.log)
+        renderCycleResult(claimResult).forEach(console.log)
+      }
 
-  while (running) {
-    const isFastMode = Date.now() < fastModeUntil
+      // Aggiorna summary finale
+      summary = await fetchSummary(thor, config, Address.of(getWallet().privateKey).toString())
+      renderSummary(summary)
 
-    let lastErr: unknown
-    for (let attempt = 1; attempt <= nodePool.length; attempt++) {
-      try {
-        const summary = await fetchSummary(thor, config, walletAddress)
+      // Reset flag quando il round finisce
+      if (!summary.isRoundActive) {
+        currentRoundVoted = false
+      }
 
-        // Attiva fast mode all'inizio di un nuovo round
-        if (summary.isRoundActive && fastModeUntil === 0) {
-          fastModeUntil = Date.now() + 15 * 60 * 1000
-          pollMs = 4000
-          log(chalk.green.bold("🚀 NEW ROUND DETECTED → FAST MODE (4s polling for 15 min)"))
-        }
-
-        if (summary.isRoundActive) {
-          logRaw(logSectionHeader("vote", summary.currentRoundId))
-          const voteResult = await runCastVoteCycle(thor, config, walletAddress, privateKey, batchSize, dryRun, log)
-          renderCycleResult(voteResult).forEach(log)
-        } else {
-          log(chalk.dim("Round not active, skipping cast-vote"))
-          if (fastModeUntil > 0 && Date.now() > fastModeUntil) {
-            fastModeUntil = 0
-            pollMs = 15000
-            log(chalk.yellow("Fast mode ended"))
-          }
-        }
-
-        logRaw(logSectionHeader("claim", summary.previousRoundId))
-        const claimResult = await runClaimRewardCycle(thor, config, walletAddress, privateKey, batchSize, dryRun, log)
-        renderCycleResult(claimResult).forEach(log)
-
-        // Refresh dashboard
-        const updated = await fetchSummary(thor, config, walletAddress)
-        process.stdout.write("\x1B[2J\x1B[H")
-        console.log(renderSummary(updated))
-        console.log(chalk.bold("─── Activity Log ") + "─".repeat(49))
-        activityLog.slice(-30).forEach(l => console.log(l))
-
-        lastErr = undefined
+      if (runOnce) {
+        console.log("Run once complete. Exiting.")
         break
-      } catch (err) {
-        lastErr = err
-        if (attempt < nodePool.length) {
-          rotateNode()
-          await new Promise(r => setTimeout(r, 2000))
-        }
       }
+
+      console.log(chalk.dim(`Next cycle in ${(pollMs / 1000)}s...`))
+      await new Promise(r => setTimeout(r, pollMs))
+
+    } catch (err) {
+      lastErr = err
+      console.log(chalk.red(`Cycle error: ${err instanceof Error ? err.message : String(err)}`))
+      thor = thorPool.rotate()
+      await new Promise(r => setTimeout(r, 5000))
     }
-
-    if (lastErr) log(chalk.red(`Cycle error: ${lastErr}`))
-    if (runOnce) break
-
-    log(chalk.dim(`Next cycle in ${Math.round(pollMs/1000)}s...`))
-    await new Promise(r => setTimeout(r, pollMs))
   }
 }
 
-main().catch(err => {
-  console.error(chalk.red("Fatal error:"), err)
-  process.exit(1)
-})
+main().catch(console.error)
 
-//Final fix - initial summary pulito e robusto
+//Add voting priority mode - skip claims at new round start
