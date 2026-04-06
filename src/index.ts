@@ -113,5 +113,3 @@ async function main() {
 }
 
 main().catch(console.error)
-
-//Final index.ts - priority vote + simple node rotation
