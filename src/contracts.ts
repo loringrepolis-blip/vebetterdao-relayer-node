@@ -185,6 +185,29 @@ export async function getAutoVotingUsers(
     .map(([addr]) => addr)
 }
 
+// ── PRE-FETCH CACHE (chiamata periodica) ─────────────────────────────
+/**
+ * Aggiorna proattivamente la cache degli auto-voting users fino al blocco più recente.
+ * Da chiamare ogni 10 secondi in background.
+ */
+export async function preFetchAutoVotingUsers(
+  thor: ThorClient,
+  contractAddress: string,
+  log?: LogFn
+): Promise<void> {
+  try {
+    const best = await thor.blocks.getBestBlockCompressed();
+    const latestBlock = best?.number ?? 0;
+    if (latestBlock === 0) return;
+
+    // Forza l'aggiornamento della cache fino al blocco corrente
+    await getAutoVotingUsers(thor, contractAddress, latestBlock);
+    if (log) log(chalk.dim(`Pre-fetched auto-voting cache up to block ${latestBlock}`));
+  } catch (err) {
+    // Silenzioso in background
+  }
+}
+
 // ── Funzioni rimanenti (invariate) ─────────────────────────────────────
 export async function getAlreadySkippedVotersForRound(
   thor: ThorClient,
