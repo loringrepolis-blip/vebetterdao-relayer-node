@@ -1,6 +1,7 @@
 import { ThorClient } from "@vechain/sdk-network"
 import { ABIContract, Hex } from "@vechain/sdk-core"
 import { LogFn } from "./types"
+import chalk from "chalk"
 import {
   XAllocationVoting__factory,
   VoterRewards__factory,
@@ -537,3 +538,5 @@ export async function getRelayerWeightedActions(thor: ThorClient, addr: string, 
 }
 
 //Increase preferred relayers batch to 250 for faster startup
+//Pre-fetched auto-voting cache up to block XXXXXXX
+//fix: add missing chalk import in contracts.ts for pre-fetch
