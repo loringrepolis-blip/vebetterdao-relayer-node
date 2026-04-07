@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * VeBetterDAO Relayer Node - PRIORITY VOTE MODE (versione stabile e definitiva)
+ * VeBetterDAO Relayer Node - PRIORITY VOTE MODE + PRE-FETCH CACHE
  */
 
 import * as fs from "fs"
@@ -8,7 +8,7 @@ import { ThorClient } from "@vechain/sdk-network"
 import { Address, HDKey } from "@vechain/sdk-core"
 import chalk from "chalk"
 import { getNetworkConfig, getNodePool } from "./config"
-import { fetchSummary } from "./contracts"
+import { fetchSummary, preFetchAutoVotingUsers } from "./contracts"
 import { runCastVoteCycle, runClaimRewardCycle } from "./relayer"
 import { renderSummary, renderCycleResult, logSectionHeader, timestamp } from "./display"
 
@@ -96,10 +96,19 @@ async function main() {
   let running = true
   let pollMs = 15000
   let fastModeUntil = 0
-  let currentRoundVoted = false   // ← PRIORITY VOTE MODE
+  let currentRoundVoted = false
 
   process.on("SIGINT", () => { running = false; log(chalk.yellow("Shutting down...")) })
   process.on("SIGTERM", () => { running = false; log(chalk.yellow("Shutting down...")) })
+
+  // ── PRE-FETCH BACKGROUND (nuova feature) ─────────────────────────────
+  const PRE_FETCH_INTERVAL = 10000 // 10 secondi
+  const preFetchInterval = setInterval(async () => {
+    if (!running) return
+    try {
+      await preFetchAutoVotingUsers(thor, config.xAllocationVotingAddress, log)
+    } catch {}
+  }, PRE_FETCH_INTERVAL)
 
   // FIX iniziale robusto
   let initialSummary = null
@@ -123,9 +132,7 @@ async function main() {
   }
 
   while (running) {
-    const isFastMode = Date.now() < fastModeUntil
     let lastErr: unknown
-
     for (let attempt = 1; attempt <= nodePool.length; attempt++) {
       try {
         const summary = await fetchSummary(thor, config, walletAddress)
@@ -140,11 +147,10 @@ async function main() {
           renderCycleResult(voteResult).forEach(log)
           currentRoundVoted = true
 
-          // Attiva fast mode all'inizio del round
           if (fastModeUntil === 0) {
             fastModeUntil = Date.now() + 15 * 60 * 1000
-            pollMs = 4000
-            log(chalk.green.bold("🚀 FAST MODE (4s polling for 15 min)"))
+            pollMs = 2000 // ← ancora più aggressivo (2 secondi)
+            log(chalk.green.bold("🚀 FAST MODE (2s polling for 15 min)"))
           }
         } else if (summary.isRoundActive) {
           logRaw(logSectionHeader("vote", summary.currentRoundId))
@@ -159,14 +165,12 @@ async function main() {
           }
         }
 
-        // Claim SOLO dopo aver votato (o se non è l'inizio di un nuovo round)
         if (!isNewRound && summary.previousRoundId > 0) {
           logRaw(logSectionHeader("claim", summary.previousRoundId))
           const claimResult = await runClaimRewardCycle(thor, config, walletAddress, privateKey, batchSize, dryRun, log)
           renderCycleResult(claimResult).forEach(log)
         }
 
-        // Refresh dashboard
         const updated = await fetchSummary(thor, config, walletAddress)
         process.stdout.write("\x1B[2J\x1B[H")
         console.log(renderSummary(updated))
@@ -175,7 +179,6 @@ async function main() {
 
         lastErr = undefined
         break
-
       } catch (err) {
         lastErr = err
         if (attempt < nodePool.length) {
@@ -191,14 +194,13 @@ async function main() {
     log(chalk.dim(`Next cycle in ${Math.round(pollMs/1000)}s...`))
     await new Promise(r => setTimeout(r, pollMs))
 
-    // Reset flag quando il round finisce
     if (!running) break
   }
+
+  clearInterval(preFetchInterval)
 }
 
 main().catch(err => {
   console.error(chalk.red("Fatal error:"), err)
   process.exit(1)
 })
-
-//Add PRIORITY VOTE MODE - vote first, claim after
