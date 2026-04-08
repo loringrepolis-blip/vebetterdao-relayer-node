@@ -197,7 +197,9 @@ async function main() {
     if (lastErr) log(chalk.red(`Cycle error: ${lastErr}`))
     if (runOnce) break
 
-    log(chalk.dim(`Next cycle in ${Math.round(pollMs/1000)}s...`))
+    // ←←← RIGA MODIFICATA: mostra i millisecondi ESATTI
+    log(chalk.dim(`Next cycle in ${pollMs} ms (${Math.round(pollMs/1000)}s)...`))
+
     await new Promise(r => setTimeout(r, pollMs))
 
     if (!running) break
@@ -210,5 +212,3 @@ main().catch(err => {
   console.error(chalk.red("Fatal error:"), err)
   process.exit(1)
 })
-
-//Clean: rimosso DEBUG + pollMs pronto per 1500ms
