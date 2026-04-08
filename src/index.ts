@@ -96,10 +96,6 @@ async function main() {
   let pollMs = parseInt(process.env.POLL_INTERVAL_MS || "15000", 10)
   if (isNaN(pollMs) || pollMs < 1000) pollMs = 15000
 
-  // DEBUG visibile nei log (importantissimo!)
-  console.log(chalk.yellow(`[DEBUG] POLL_INTERVAL_MS letto da env = ${process.env.POLL_INTERVAL_MS || 'NON IMPOSTATO'}`))
-  console.log(chalk.yellow(`[DEBUG] Polling iniziale impostato a = ${pollMs} ms`))
-
   let fastModeUntil = 0
   let currentRoundVoted = false
 
@@ -215,4 +211,4 @@ main().catch(err => {
   process.exit(1)
 })
 
-//Fix pollMs duplicate + env reading
+//Clean: rimosso DEBUG + pollMs pronto per 1500ms
