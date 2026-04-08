@@ -83,16 +83,22 @@ async function main() {
   const runOnce = envBool("RUN_ONCE")
 
   // ── MODALITÀ SEPARATE ─────────────────────────────
-  const voteOnly = envBool("VOTE_ONLY")
-  const claimOnly = envBool("CLAIM_ONLY")
+const voteOnly = envBool("VOTE_ONLY")
+const claimOnly = envBool("CLAIM_ONLY")
+if (voteOnly && claimOnly) {
+  console.error(chalk.red("ERRORE: non puoi attivare sia VOTE_ONLY che CLAIM_ONLY"))
+  process.exit(1)
+}
+const mode = voteOnly ? "SOLO VOTO" : claimOnly ? "SOLO CLAIM" : "VOTO + CLAIM"
+console.log(chalk.green.bold(`\n🚀 Relayer avviato in modalità: ${mode}`))
 
-  if (voteOnly && claimOnly) {
-    console.error(chalk.red("ERRORE: non puoi attivare sia VOTE_ONLY che CLAIM_ONLY"))
-    process.exit(1)
-  }
+// ── POLLING INTERVAL DA ENV (ora rispetta Railway) ─────────────────────────────
+let pollMs = parseInt(process.env.POLL_INTERVAL_MS || "15000", 10)
+if (isNaN(pollMs) || pollMs < 1000) pollMs = 15000
 
-  const mode = voteOnly ? "SOLO VOTO" : claimOnly ? "SOLO CLAIM" : "VOTO + CLAIM"
-  console.log(chalk.green.bold(`\n🚀 Relayer avviato in modalità: ${mode}`))
+// DEBUG per verificare cosa legge davvero Railway
+console.log(chalk.yellow(`[DEBUG] POLL_INTERVAL_MS letto da env = ${process.env.POLL_INTERVAL_MS || 'NON IMPOSTATO'}`))
+console.log(chalk.yellow(`[DEBUG] Polling iniziale impostato a = ${pollMs} ms`))
 
   const nodePool = nodeUrlOverride ? [nodeUrlOverride] : getNodePool(network)
   let nodeIndex = 0
@@ -210,3 +216,5 @@ main().catch(err => {
   console.error(chalk.red("Fatal error:"), err)
   process.exit(1)
 })
+
+//Fix: aggiunto lettura POLL_INTERVAL_MS da env + debug
