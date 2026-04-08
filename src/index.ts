@@ -113,9 +113,16 @@ console.log(chalk.yellow(`[DEBUG] Polling iniziale impostato a = ${pollMs} ms`))
   }
 
   let running = true
-  let pollMs = 15000
-  let fastModeUntil = 0
-  let currentRoundVoted = false
+// ── POLLING INTERVAL DA ENV (rispetta Railway) ─────────────────────────────
+let pollMs = parseInt(process.env.POLL_INTERVAL_MS || "15000", 10)
+if (isNaN(pollMs) || pollMs < 1000) pollMs = 15000
+
+let fastModeUntil = 0
+let currentRoundVoted = false
+
+// DEBUG per vedere cosa legge Railway
+console.log(chalk.yellow(`[DEBUG] POLL_INTERVAL_MS letto da env = ${process.env.POLL_INTERVAL_MS || 'NON IMPOSTATO'}`))
+console.log(chalk.yellow(`[DEBUG] Polling iniziale impostato a = ${pollMs} ms`))
 
   // Pre-fetch cache (sempre attivo)
   const PRE_FETCH_INTERVAL = 10000
@@ -218,3 +225,4 @@ main().catch(err => {
 })
 
 //Fix: aggiunto lettura POLL_INTERVAL_MS da env + debug
+//Fix: corretto doppio pollMs + lettura POLL_INTERVAL_MS da env
