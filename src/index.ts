@@ -83,22 +83,25 @@ async function main() {
   const runOnce = envBool("RUN_ONCE")
 
   // ── MODALITÀ SEPARATE ─────────────────────────────
-const voteOnly = envBool("VOTE_ONLY")
-const claimOnly = envBool("CLAIM_ONLY")
-if (voteOnly && claimOnly) {
-  console.error(chalk.red("ERRORE: non puoi attivare sia VOTE_ONLY che CLAIM_ONLY"))
-  process.exit(1)
-}
-const mode = voteOnly ? "SOLO VOTO" : claimOnly ? "SOLO CLAIM" : "VOTO + CLAIM"
-console.log(chalk.green.bold(`\n🚀 Relayer avviato in modalità: ${mode}`))
+  const voteOnly = envBool("VOTE_ONLY")
+  const claimOnly = envBool("CLAIM_ONLY")
+  if (voteOnly && claimOnly) {
+    console.error(chalk.red("ERRORE: non puoi attivare sia VOTE_ONLY che CLAIM_ONLY"))
+    process.exit(1)
+  }
+  const mode = voteOnly ? "SOLO VOTO" : claimOnly ? "SOLO CLAIM" : "VOTO + CLAIM"
+  console.log(chalk.green.bold(`\n🚀 Relayer avviato in modalità: ${mode}`))
 
-// ── POLLING INTERVAL DA ENV (ora rispetta Railway) ─────────────────────────────
-let pollMs = parseInt(process.env.POLL_INTERVAL_MS || "15000", 10)
-if (isNaN(pollMs) || pollMs < 1000) pollMs = 15000
+  // ── POLLING INTERVAL DA ENV (rispetta Railway) ─────────────────────────────
+  let pollMs = parseInt(process.env.POLL_INTERVAL_MS || "15000", 10)
+  if (isNaN(pollMs) || pollMs < 1000) pollMs = 15000
 
-// DEBUG per verificare cosa legge davvero Railway
-console.log(chalk.yellow(`[DEBUG] POLL_INTERVAL_MS letto da env = ${process.env.POLL_INTERVAL_MS || 'NON IMPOSTATO'}`))
-console.log(chalk.yellow(`[DEBUG] Polling iniziale impostato a = ${pollMs} ms`))
+  // DEBUG visibile nei log (importantissimo!)
+  console.log(chalk.yellow(`[DEBUG] POLL_INTERVAL_MS letto da env = ${process.env.POLL_INTERVAL_MS || 'NON IMPOSTATO'}`))
+  console.log(chalk.yellow(`[DEBUG] Polling iniziale impostato a = ${pollMs} ms`))
+
+  let fastModeUntil = 0
+  let currentRoundVoted = false
 
   const nodePool = nodeUrlOverride ? [nodeUrlOverride] : getNodePool(network)
   let nodeIndex = 0
@@ -113,16 +116,6 @@ console.log(chalk.yellow(`[DEBUG] Polling iniziale impostato a = ${pollMs} ms`))
   }
 
   let running = true
-// ── POLLING INTERVAL DA ENV (rispetta Railway) ─────────────────────────────
-let pollMs = parseInt(process.env.POLL_INTERVAL_MS || "15000", 10)
-if (isNaN(pollMs) || pollMs < 1000) pollMs = 15000
-
-let fastModeUntil = 0
-let currentRoundVoted = false
-
-// DEBUG per vedere cosa legge Railway
-console.log(chalk.yellow(`[DEBUG] POLL_INTERVAL_MS letto da env = ${process.env.POLL_INTERVAL_MS || 'NON IMPOSTATO'}`))
-console.log(chalk.yellow(`[DEBUG] Polling iniziale impostato a = ${pollMs} ms`))
 
   // Pre-fetch cache (sempre attivo)
   const PRE_FETCH_INTERVAL = 10000
@@ -146,7 +139,6 @@ console.log(chalk.yellow(`[DEBUG] Polling iniziale impostato a = ${pollMs} ms`))
       }
     }
   }
-
   if (initialSummary) {
     process.stdout.write("\x1B[2J\x1B[H")
     console.log(renderSummary(initialSummary))
@@ -157,7 +149,6 @@ console.log(chalk.yellow(`[DEBUG] Polling iniziale impostato a = ${pollMs} ms`))
     for (let attempt = 1; attempt <= nodePool.length; attempt++) {
       try {
         const summary = await fetchSummary(thor, config, walletAddress)
-
         const isNewRound = summary.isRoundActive && !currentRoundVoted
 
         // ── VOTO ─────────────────────────────
@@ -224,5 +215,4 @@ main().catch(err => {
   process.exit(1)
 })
 
-//Fix: aggiunto lettura POLL_INTERVAL_MS da env + debug
-//Fix: corretto doppio pollMs + lettura POLL_INTERVAL_MS da env
+//Fix pollMs duplicate + env reading
