@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * VeBetterDAO Relayer Node - PRIORITY VOTE MODE + PRE-FETCH CACHE
+ * VeBetterDAO Relayer Node - VERSIONE SEPARATA VOTO / CLAIM
+ * Supporta VOTE_ONLY e CLAIM_ONLY per massimizzare competitività
  */
 
 import * as fs from "fs"
@@ -77,9 +78,21 @@ async function main() {
   const config = getNetworkConfig(network, nodeUrlOverride)
   const { walletAddress, privateKey } = getWallet()
 
-  const batchSize = Math.max(1, parseInt(process.env.BATCH_SIZE || "120", 10))
+  const batchSize = Math.max(1, parseInt(process.env.BATCH_SIZE || "150", 10))
   const dryRun = envBool("DRY_RUN")
   const runOnce = envBool("RUN_ONCE")
+
+  // ── MODALITÀ SEPARATE ─────────────────────────────
+  const voteOnly = envBool("VOTE_ONLY")
+  const claimOnly = envBool("CLAIM_ONLY")
+
+  if (voteOnly && claimOnly) {
+    console.error(chalk.red("ERRORE: non puoi attivare sia VOTE_ONLY che CLAIM_ONLY"))
+    process.exit(1)
+  }
+
+  const mode = voteOnly ? "SOLO VOTO" : claimOnly ? "SOLO CLAIM" : "VOTO + CLAIM"
+  console.log(chalk.green.bold(`\n🚀 Relayer avviato in modalità: ${mode}`))
 
   const nodePool = nodeUrlOverride ? [nodeUrlOverride] : getNodePool(network)
   let nodeIndex = 0
@@ -98,11 +111,8 @@ async function main() {
   let fastModeUntil = 0
   let currentRoundVoted = false
 
-  process.on("SIGINT", () => { running = false; log(chalk.yellow("Shutting down...")) })
-  process.on("SIGTERM", () => { running = false; log(chalk.yellow("Shutting down...")) })
-
-  // ── PRE-FETCH BACKGROUND (nuova feature) ─────────────────────────────
-  const PRE_FETCH_INTERVAL = 10000 // 10 secondi
+  // Pre-fetch cache (sempre attivo)
+  const PRE_FETCH_INTERVAL = 10000
   const preFetchInterval = setInterval(async () => {
     if (!running) return
     try {
@@ -110,7 +120,7 @@ async function main() {
     } catch {}
   }, PRE_FETCH_INTERVAL)
 
-  // FIX iniziale robusto
+  // FIX iniziale
   let initialSummary = null
   for (let attempt = 1; attempt <= 5; attempt++) {
     try {
@@ -127,8 +137,6 @@ async function main() {
   if (initialSummary) {
     process.stdout.write("\x1B[2J\x1B[H")
     console.log(renderSummary(initialSummary))
-  } else {
-    console.log(chalk.dim("Initial summary not available yet"))
   }
 
   while (running) {
@@ -137,38 +145,36 @@ async function main() {
       try {
         const summary = await fetchSummary(thor, config, walletAddress)
 
-        // ── PRIORITY VOTE MODE ─────────────────────────────
         const isNewRound = summary.isRoundActive && !currentRoundVoted
 
-        if (isNewRound) {
-          logRaw(logSectionHeader("vote", summary.currentRoundId))
-          console.log(chalk.green.bold("🔥 NEW ROUND DETECTED → VOTING PRIORITY MODE (skipping claims)"))
-          const voteResult = await runCastVoteCycle(thor, config, walletAddress, privateKey, batchSize, dryRun, log)
-          renderCycleResult(voteResult).forEach(log)
-          currentRoundVoted = true
+        // ── VOTO ─────────────────────────────
+        if (!claimOnly) {
+          if (isNewRound) {
+            logRaw(logSectionHeader("vote", summary.currentRoundId))
+            console.log(chalk.green.bold("🔥 NEW ROUND DETECTED → VOTING PRIORITY MODE"))
+            const voteResult = await runCastVoteCycle(thor, config, walletAddress, privateKey, batchSize, dryRun, log)
+            renderCycleResult(voteResult).forEach(log)
+            currentRoundVoted = true
 
-          if (fastModeUntil === 0) {
-            fastModeUntil = Date.now() + 15 * 60 * 1000
-            pollMs = 2000 // ← ancora più aggressivo (2 secondi)
-            log(chalk.green.bold("🚀 FAST MODE (2s polling for 15 min)"))
-          }
-        } else if (summary.isRoundActive) {
-          logRaw(logSectionHeader("vote", summary.currentRoundId))
-          const voteResult = await runCastVoteCycle(thor, config, walletAddress, privateKey, batchSize, dryRun, log)
-          renderCycleResult(voteResult).forEach(log)
-        } else {
-          console.log(chalk.dim("Round not active, skipping cast-vote"))
-          if (fastModeUntil > 0 && Date.now() > fastModeUntil) {
-            fastModeUntil = 0
-            pollMs = 15000
-            log(chalk.yellow("Fast mode ended"))
+            if (fastModeUntil === 0) {
+              fastModeUntil = Date.now() + 15 * 60 * 1000
+              pollMs = 2000
+              log(chalk.green.bold("🚀 FAST MODE (2s polling for 15 min)"))
+            }
+          } else if (summary.isRoundActive) {
+            logRaw(logSectionHeader("vote", summary.currentRoundId))
+            const voteResult = await runCastVoteCycle(thor, config, walletAddress, privateKey, batchSize, dryRun, log)
+            renderCycleResult(voteResult).forEach(log)
           }
         }
 
-        if (!isNewRound && summary.previousRoundId > 0) {
-          logRaw(logSectionHeader("claim", summary.previousRoundId))
-          const claimResult = await runClaimRewardCycle(thor, config, walletAddress, privateKey, batchSize, dryRun, log)
-          renderCycleResult(claimResult).forEach(log)
+        // ── CLAIM ─────────────────────────────
+        if (!voteOnly) {
+          if (!isNewRound && summary.previousRoundId > 0) {
+            logRaw(logSectionHeader("claim", summary.previousRoundId))
+            const claimResult = await runClaimRewardCycle(thor, config, walletAddress, privateKey, batchSize, dryRun, log)
+            renderCycleResult(claimResult).forEach(log)
+          }
         }
 
         const updated = await fetchSummary(thor, config, walletAddress)
