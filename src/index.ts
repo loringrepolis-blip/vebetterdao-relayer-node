@@ -82,7 +82,6 @@ async function main() {
   const dryRun = envBool("DRY_RUN")
   const runOnce = envBool("RUN_ONCE")
 
-  // ── MODALITÀ SEPARATE ─────────────────────────────
   const voteOnly = envBool("VOTE_ONLY")
   const claimOnly = envBool("CLAIM_ONLY")
   if (voteOnly && claimOnly) {
@@ -92,7 +91,7 @@ async function main() {
   const mode = voteOnly ? "SOLO VOTO" : claimOnly ? "SOLO CLAIM" : "VOTO + CLAIM"
   console.log(chalk.green.bold(`\n🚀 Relayer avviato in modalità: ${mode}`))
 
-  // ── POLLING INTERVAL DA ENV (rispetta Railway) ─────────────────────────────
+  // POLLING INTERVAL DA ENV
   let pollMs = parseInt(process.env.POLL_INTERVAL_MS || "15000", 10)
   if (isNaN(pollMs) || pollMs < 1000) pollMs = 15000
 
@@ -113,7 +112,6 @@ async function main() {
 
   let running = true
 
-  // Pre-fetch cache (sempre attivo)
   const PRE_FETCH_INTERVAL = 10000
   const preFetchInterval = setInterval(async () => {
     if (!running) return
@@ -122,7 +120,6 @@ async function main() {
     } catch {}
   }, PRE_FETCH_INTERVAL)
 
-  // FIX iniziale
   let initialSummary = null
   for (let attempt = 1; attempt <= 5; attempt++) {
     try {
@@ -147,7 +144,6 @@ async function main() {
         const summary = await fetchSummary(thor, config, walletAddress)
         const isNewRound = summary.isRoundActive && !currentRoundVoted
 
-        // ── VOTO ─────────────────────────────
         if (!claimOnly) {
           if (isNewRound) {
             logRaw(logSectionHeader("vote", summary.currentRoundId))
@@ -168,7 +164,6 @@ async function main() {
           }
         }
 
-        // ── CLAIM ─────────────────────────────
         if (!voteOnly) {
           if (!isNewRound && summary.previousRoundId > 0) {
             logRaw(logSectionHeader("claim", summary.previousRoundId))
@@ -197,9 +192,7 @@ async function main() {
     if (lastErr) log(chalk.red(`Cycle error: ${lastErr}`))
     if (runOnce) break
 
-    // ←←← RIGA MODIFICATA: mostra i millisecondi ESATTI
     log(chalk.dim(`Next cycle in ${pollMs} ms (${Math.round(pollMs/1000)}s)...`))
-
     await new Promise(r => setTimeout(r, pollMs))
 
     if (!running) break
