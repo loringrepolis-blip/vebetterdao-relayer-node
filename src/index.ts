@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * VeBetterDAO Relayer Node - VERSIONE STABILE ULTRA-AGGRESSIVA
+ * VeBetterDAO Relayer Node - VERSIONE STABILE SEMPLIFICATA
  * VOTO: 1000ms + batch 100 | CLAIM: 3000ms + batch 250
  */
 
@@ -63,7 +63,7 @@ console.log(chalk.yellow(`[CONFIG] POLL_INTERVAL_MS = ${pollMs} ms`))
 console.log(chalk.yellow(`[CONFIG] BATCH_SIZE = ${batchSize}`))
 
 const config = getNetworkConfig(process.env.RELAYER_NETWORK || "mainnet")
-const nodes = MAINNET_NODES // array di URL
+const nodes = MAINNET_NODES
 let currentNodeIndex = 0
 let thor = ThorClient.at(nodes[0])
 
