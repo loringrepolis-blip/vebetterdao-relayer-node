@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
- * VeBetterDAO Relayer Node - VERSIONE ULTRA-AGGRESSIVA 2026
+ * VeBetterDAO Relayer Node - VERSIONE STABILE ULTRA-AGGRESSIVA
  * VOTO: 1000ms + batch 100 | CLAIM: 3000ms + batch 250
  */
 
 import * as fs from "fs"
 import { ThorClient } from "@vechain/sdk-network"
-import { Address, HDKey } from "@vechain/sdk-core"
+import { Address } from "@vechain/sdk-core"
 import chalk from "chalk"
-import { getNetworkConfig, getNodePool } from "./config"
+import { getNetworkConfig, MAINNET_NODES } from "./config"
 import { fetchSummary, preFetchAutoVotingUsers } from "./contracts"
 import { runCastVoteCycle, runClaimRewardCycle } from "./relayer"
 import { renderSummary, renderCycleResult, logSectionHeader, timestamp } from "./display"
@@ -47,7 +47,7 @@ function getWallet(): { walletAddress: string; privateKey: string } {
   process.exit(1)
 }
 
-// ── CONFIG ULTRA-AGGRESSIVA ─────────────────────────────────
+// ── CONFIG ─────────────────────────────────────
 const voteOnly = envBool("VOTE_ONLY", true)
 const claimOnly = envBool("CLAIM_ONLY", false)
 const batchSize = Math.max(1, parseInt(process.env.BATCH_SIZE || "100", 10))
@@ -63,8 +63,10 @@ console.log(chalk.yellow(`[CONFIG] POLL_INTERVAL_MS = ${pollMs} ms`))
 console.log(chalk.yellow(`[CONFIG] BATCH_SIZE = ${batchSize}`))
 
 const config = getNetworkConfig(process.env.RELAYER_NETWORK || "mainnet")
-const nodePool = getNodePool(config)
-let thor = nodePool.current()
+const nodes = MAINNET_NODES // array di URL
+let currentNodeIndex = 0
+let thor = ThorClient.at(nodes[0])
+
 const { walletAddress, privateKey } = getWallet()
 
 let fastModeUntil = 0
@@ -88,11 +90,11 @@ function logRaw(msg: string) {
 }
 
 function rotateNode() {
-  thor = nodePool.rotate()
-  log(chalk.yellow(`🔄 Rotating to node: ${thor.getNodeUrl()}`))
+  currentNodeIndex = (currentNodeIndex + 1) % nodes.length
+  thor = ThorClient.at(nodes[currentNodeIndex])
+  log(chalk.yellow(`🔄 Rotating to node: ${nodes[currentNodeIndex]}`))
 }
 
-// ── MAIN ─────────────────────────────────────────────
 async function main() {
   log(chalk.green.bold("🚀 Starting VeBetterDAO Relayer..."))
 
@@ -107,7 +109,6 @@ async function main() {
         const summary = await fetchSummary(thor, config, walletAddress)
         const isNewRound = summary.isRoundActive && !currentRoundVoted
 
-        // VOTO
         if (voteOnly || !claimOnly) {
           if (isNewRound) {
             log(chalk.green.bold("🚀 NEW ROUND DETECTED → VOTING PRIORITY MODE"))
@@ -122,7 +123,6 @@ async function main() {
           }
         }
 
-        // CLAIM
         if (claimOnly || !voteOnly) {
           if (!isNewRound && summary.previousRoundId > 0) {
             logRaw(logSectionHeader("claim", summary.previousRoundId))
@@ -131,7 +131,6 @@ async function main() {
           }
         }
 
-        // Refresh UI
         const updated = await fetchSummary(thor, config, walletAddress)
         process.stdout.write("\x1B[2J\x1B[H")
         console.log(renderSummary(updated))
