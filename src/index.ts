@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * VeBetterDAO Relayer Node - VERSIONE SEPARATA VOTO / CLAIM
- * Supporta VOTE_ONLY e CLAIM_ONLY per massimizzare competitività
+ * VeBetterDAO Relayer Node - VERSIONE ULTRA-AGGRESSIVA 2026
+ * VOTO: 1000ms + batch 100 | CLAIM: 3000ms + batch 250
  */
 
 import * as fs from "fs"
@@ -29,6 +29,11 @@ function envOrSecret(envKey: string, secretName: string): string | undefined {
   return process.env[envKey]?.trim() || readSecret(secretName)
 }
 
+function envBool(key: string, defaultValue = false): boolean {
+  const val = process.env[key]?.trim().toLowerCase()
+  return val === "1" || val === "true" || (defaultValue && val !== "0" && val !== "false")
+}
+
 function getWallet(): { walletAddress: string; privateKey: string } {
   const pk = envOrSecret("RELAYER_PRIVATE_KEY", "relayer_private_key")
   if (pk) {
@@ -38,133 +43,87 @@ function getWallet(): { walletAddress: string; privateKey: string } {
       privateKey: clean,
     }
   }
-  const mnemonic = envOrSecret("MNEMONIC", "mnemonic")
-  const words = mnemonic?.split(/\s+/)
-  if (!words?.length) {
-    console.error(chalk.red("Set MNEMONIC or RELAYER_PRIVATE_KEY"))
-    process.exit(1)
-  }
-  const child = HDKey.fromMnemonic(words).deriveChild(0)
-  const raw = child.privateKey!
-  return {
-    walletAddress: Address.ofPublicKey(child.publicKey as Uint8Array).toString(),
-    privateKey: Buffer.from(raw).toString("hex"),
-  }
+  console.error(chalk.red("❌ RELAYER_PRIVATE_KEY non impostata"))
+  process.exit(1)
 }
 
-function envBool(key: string): boolean {
-  return /^(1|true|yes)$/i.test(process.env[key] || "")
-}
+// ── CONFIG ULTRA-AGGRESSIVA ─────────────────────────────────
+const voteOnly = envBool("VOTE_ONLY", true)
+const claimOnly = envBool("CLAIM_ONLY", false)
+const batchSize = Math.max(1, parseInt(process.env.BATCH_SIZE || "100", 10))
+const dryRun = envBool("DRY_RUN")
+const runOnce = envBool("RUN_ONCE")
 
+let pollMs = parseInt(process.env.POLL_INTERVAL_MS || "1000", 10)
+if (isNaN(pollMs) || pollMs < 1000) pollMs = 1000
+
+console.log(chalk.green.bold("🚀 VeBetterDAO Relayer Node v1.1.0 - ULTRA AGGRESSIVE"))
+console.log(chalk.yellow(`[CONFIG] Modalità: ${voteOnly ? "SOLO VOTO" : claimOnly ? "SOLO CLAIM" : "VOTO+CLAIM"}`))
+console.log(chalk.yellow(`[CONFIG] POLL_INTERVAL_MS = ${pollMs} ms`))
+console.log(chalk.yellow(`[CONFIG] BATCH_SIZE = ${batchSize}`))
+
+const config = getNetworkConfig(process.env.RELAYER_NETWORK || "mainnet")
+const nodePool = getNodePool(config)
+let thor = nodePool.current()
+const { walletAddress, privateKey } = getWallet()
+
+let fastModeUntil = 0
+let currentRoundVoted = false
+let running = true
 const activityLog: string[] = []
 const MAX_LOG = 200
 
 function log(msg: string) {
-  const entry = `${timestamp()} ${msg}`
+  const ts = timestamp()
+  const entry = ts + " " + msg
+  console.log(entry)
   activityLog.push(entry)
   if (activityLog.length > MAX_LOG) activityLog.shift()
-  console.log(entry)
 }
 
 function logRaw(msg: string) {
+  console.log(msg)
   activityLog.push(msg)
   if (activityLog.length > MAX_LOG) activityLog.shift()
-  console.log(msg)
 }
 
+function rotateNode() {
+  thor = nodePool.rotate()
+  log(chalk.yellow(`🔄 Rotating to node: ${thor.getNodeUrl()}`))
+}
+
+// ── MAIN ─────────────────────────────────────────────
 async function main() {
-  const network = process.env.RELAYER_NETWORK || "mainnet"
-  const nodeUrlOverride = process.env.NODE_URL?.trim()
-  const config = getNetworkConfig(network, nodeUrlOverride)
-  const { walletAddress, privateKey } = getWallet()
+  log(chalk.green.bold("🚀 Starting VeBetterDAO Relayer..."))
 
-  const batchSize = Math.max(1, parseInt(process.env.BATCH_SIZE || "150", 10))
-  const dryRun = envBool("DRY_RUN")
-  const runOnce = envBool("RUN_ONCE")
-
-  const voteOnly = envBool("VOTE_ONLY")
-  const claimOnly = envBool("CLAIM_ONLY")
-  if (voteOnly && claimOnly) {
-    console.error(chalk.red("ERRORE: non puoi attivare sia VOTE_ONLY che CLAIM_ONLY"))
-    process.exit(1)
-  }
-  const mode = voteOnly ? "SOLO VOTO" : claimOnly ? "SOLO CLAIM" : "VOTO + CLAIM"
-  console.log(chalk.green.bold(`\n🚀 Relayer avviato in modalità: ${mode}`))
-
-  // POLLING INTERVAL DA ENV
-  let pollMs = parseInt(process.env.POLL_INTERVAL_MS || "15000", 10)
-  if (isNaN(pollMs) || pollMs < 1000) pollMs = 15000
-
-  let fastModeUntil = 0
-  let currentRoundVoted = false
-
-  const nodePool = nodeUrlOverride ? [nodeUrlOverride] : getNodePool(network)
-  let nodeIndex = 0
-  let thor = ThorClient.at(config.nodeUrl, { isPollingEnabled: false })
-
-  function rotateNode() {
-    if (nodePool.length <= 1) return
-    nodeIndex = (nodeIndex + 1) % nodePool.length
-    config.nodeUrl = nodePool[nodeIndex]
-    thor = ThorClient.at(config.nodeUrl, { isPollingEnabled: false })
-    log(chalk.yellow(`Rotating to node: ${new URL(config.nodeUrl).hostname}`))
-  }
-
-  let running = true
-
-  const PRE_FETCH_INTERVAL = 10000
-  const preFetchInterval = setInterval(async () => {
-    if (!running) return
-    try {
-      await preFetchAutoVotingUsers(thor, config.xAllocationVotingAddress, log)
-    } catch {}
-  }, PRE_FETCH_INTERVAL)
-
-  let initialSummary = null
-  for (let attempt = 1; attempt <= 5; attempt++) {
-    try {
-      initialSummary = await fetchSummary(thor, config, walletAddress)
-      break
-    } catch {
-      if (attempt < 5) {
-        rotateNode()
-        await new Promise(r => setTimeout(r, 1200))
-      }
-    }
-  }
-  if (initialSummary) {
-    process.stdout.write("\x1B[2J\x1B[H")
-    console.log(renderSummary(initialSummary))
-  }
+  const preFetchInterval = setInterval(() => {
+    preFetchAutoVotingUsers(thor, config).catch(() => {})
+  }, 10000)
 
   while (running) {
-    let lastErr: unknown
-    for (let attempt = 1; attempt <= nodePool.length; attempt++) {
+    let lastErr: any
+    for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         const summary = await fetchSummary(thor, config, walletAddress)
         const isNewRound = summary.isRoundActive && !currentRoundVoted
 
-        if (!claimOnly) {
+        // VOTO
+        if (voteOnly || !claimOnly) {
           if (isNewRound) {
-            logRaw(logSectionHeader("vote", summary.currentRoundId))
-            console.log(chalk.green.bold("🔥 NEW ROUND DETECTED → VOTING PRIORITY MODE"))
+            log(chalk.green.bold("🚀 NEW ROUND DETECTED → VOTING PRIORITY MODE"))
+            fastModeUntil = Date.now() + 15 * 60 * 1000
+            pollMs = 1000
             const voteResult = await runCastVoteCycle(thor, config, walletAddress, privateKey, batchSize, dryRun, log)
             renderCycleResult(voteResult).forEach(log)
             currentRoundVoted = true
-
-            if (fastModeUntil === 0) {
-              fastModeUntil = Date.now() + 15 * 60 * 1000
-              pollMs = 2000
-              log(chalk.green.bold("🚀 FAST MODE (2s polling for 15 min)"))
-            }
           } else if (summary.isRoundActive) {
-            logRaw(logSectionHeader("vote", summary.currentRoundId))
             const voteResult = await runCastVoteCycle(thor, config, walletAddress, privateKey, batchSize, dryRun, log)
             renderCycleResult(voteResult).forEach(log)
           }
         }
 
-        if (!voteOnly) {
+        // CLAIM
+        if (claimOnly || !voteOnly) {
           if (!isNewRound && summary.previousRoundId > 0) {
             logRaw(logSectionHeader("claim", summary.previousRoundId))
             const claimResult = await runClaimRewardCycle(thor, config, walletAddress, privateKey, batchSize, dryRun, log)
@@ -172,6 +131,7 @@ async function main() {
           }
         }
 
+        // Refresh UI
         const updated = await fetchSummary(thor, config, walletAddress)
         process.stdout.write("\x1B[2J\x1B[H")
         console.log(renderSummary(updated))
@@ -182,7 +142,7 @@ async function main() {
         break
       } catch (err) {
         lastErr = err
-        if (attempt < nodePool.length) {
+        if (attempt < 3) {
           rotateNode()
           await new Promise(r => setTimeout(r, 2000))
         }
@@ -195,7 +155,11 @@ async function main() {
     log(chalk.dim(`Next cycle in ${pollMs} ms (${Math.round(pollMs/1000)}s)...`))
     await new Promise(r => setTimeout(r, pollMs))
 
-    if (!running) break
+    if (fastModeUntil > 0 && Date.now() > fastModeUntil) {
+      pollMs = parseInt(process.env.POLL_INTERVAL_MS || "1000", 10)
+      fastModeUntil = 0
+      log(chalk.yellow("Fast mode ended"))
+    }
   }
 
   clearInterval(preFetchInterval)
